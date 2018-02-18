@@ -1,0 +1,22 @@
+[package]
+name = "webdav-server-rs"
+version = "0.1.0"
+authors = ["Miquel van Smoorenburg <mikevs@xs4all.net>"]
+
+[build-dependencies]
+cc = "1"
+
+[workspace]
+
+[dependencies]
+hyper = "0.10"
+log = "0.3"
+env_logger = "0.4"
+url = "1.6"
+regex = "0.2"
+libc = "0.2"
+time = "0.1"
+lazy_static = "1.0"
+clap = "2.29.4"
+webdav-handler = { path = "../webdav-handler-rs", version = "0.1.0" }
+pam = { path = "pam" }
