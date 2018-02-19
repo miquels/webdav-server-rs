@@ -1,3 +1,7 @@
 
 /target/
 **/*.rs.bk
+pam/Cargo.lock
+fs_quota/Cargo.lock
+fs_quota/src/rquota.h
+fs_quota/src/rquota_xdr.c
