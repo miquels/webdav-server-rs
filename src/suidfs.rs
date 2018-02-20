@@ -3,6 +3,7 @@
 //  a 1:1 mapping of the std::fs interface.
 //
 use std::path::{Path,PathBuf};
+use std::time::Duration;
 
 use std::os::raw::c_int;
 use libc::{uid_t,gid_t};
@@ -13,9 +14,15 @@ use webdav_handler::webpath::WebPath;
 use webdav_handler::fs::*;
 use webdav_handler::localfs;
 
+use cache;
+
 extern {
      fn c_setresuid(real: uid_t, effective: uid_t, saved: uid_t) -> c_int;
      fn c_setresgid(real: gid_t, effective: gid_t, saved: gid_t) -> c_int;
+}
+
+lazy_static! {
+    static ref QCACHE: cache::Cache<PathBuf, FsQuota> = cache::Cache::new().maxage(Duration::new(30, 0));
 }
 
 #[derive(Debug,Clone)]
@@ -156,12 +163,23 @@ impl DavFileSystem for SuidFs {
     }
 
     fn get_quota(&self) -> FsResult<(u64, Option<u64>)> {
-        debug!("get_quota called");
-        let _guard = UidSwitcher::new(0, 0, self.base_uid, self.base_gid)?;
-        let path = &self.basedir;
-        let r = FsQuota::check(path)
-            .or_else(|e| if e == FqError::NoQuota { FsQuota::system(path) } else { Err(e) })
-            .map_err(|_| FsError::GeneralFailure)?;
+        let mut key = self.basedir.clone();
+        key.push(&self.base_uid.to_string());
+        let r = match QCACHE.get(&key) {
+            Some(r) => {
+                debug!("get_quota for {:?}: from cache", key);
+                r
+            },
+            None => {
+                let _guard = UidSwitcher::new(0, 0, self.base_uid, self.base_gid)?;
+                let path = &self.basedir;
+                let r = FsQuota::check(path)
+                    .or_else(|e| if e == FqError::NoQuota { FsQuota::system(path) } else { Err(e) })
+                    .map_err(|_| FsError::GeneralFailure)?;
+                debug!("get_quota for {:?}: insert to cache", key);
+                QCACHE.insert(key, r)
+            },
+        };
         Ok((r.bytes_used, r.bytes_limit))
     }
 }
