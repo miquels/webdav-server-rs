@@ -2,10 +2,12 @@
 //  Simple implementation of a DavFileSystem, basically
 //  a 1:1 mapping of the std::fs interface.
 //
-use std::path::Path;
+use std::path::{Path,PathBuf};
 
 use std::os::raw::c_int;
 use libc::{uid_t,gid_t};
+
+use fs_quota::*;
 
 use webdav_handler::webpath::WebPath;
 use webdav_handler::fs::*;
@@ -22,13 +24,16 @@ pub struct SuidFs {
     user_gid:   gid_t,
     base_uid:   uid_t,
     base_gid:   gid_t,
+    basedir:    PathBuf,
     fs:         Box<localfs::LocalFs>,
 }
 
 impl SuidFs {
-    pub fn new<P: AsRef<Path>>(base: P, public: bool, user_uid: uid_t, user_gid: gid_t, base_uid: uid_t, base_gid: gid_t) -> Box<SuidFs> {
+    pub fn new<P: AsRef<Path> + Clone>(base: P, public: bool, user_uid: uid_t, user_gid: gid_t, base_uid: uid_t, base_gid: gid_t) -> Box<SuidFs> {
+        let base = base.as_ref();
         Box::new(SuidFs{
             fs: localfs::LocalFs::new(base, public),
+            basedir:    base.to_path_buf(),
             user_uid:   user_uid,
             user_gid:   user_gid,
             base_uid:   base_uid,
@@ -37,6 +42,9 @@ impl SuidFs {
     }
     fn switch_uid(&self) -> FsResult<UidSwitcher> {
         UidSwitcher::new(self.user_uid, self.user_gid, self.base_uid, self.base_gid)
+    }
+    fn fspath(&self, path: &WebPath) -> PathBuf {
+        path.as_pathbuf_with_prefix(&self.basedir)
     }
 }
 
@@ -148,6 +156,15 @@ impl DavFileSystem for SuidFs {
     fn copy(&self, from: &WebPath, to: &WebPath) -> FsResult<()> {
         let _guard = self.switch_uid()?;
         self.fs.rename(from, to)
+    }
+
+    fn get_quota(&self, path: &WebPath) -> FsResult<(u64, Option<u64>)> {
+        let _guard = UidSwitcher::new(0, 0, self.base_uid, self.base_gid)?;
+        let path = self.fspath(path);
+        let r = FsQuota::check(&path)
+            .or_else(|e| if e == FqError::NoQuota { FsQuota::system(&path) } else { Err(e) })
+            .map_err(|_| FsError::GeneralFailure)?;
+        Ok((r.bytes_used, r.bytes_limit))
     }
 }
 

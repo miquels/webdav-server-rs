@@ -13,6 +13,7 @@ extern crate env_logger;
 extern crate webdav_handler;
 extern crate libc;
 extern crate pam;
+extern crate fs_quota;
 
 use std::path::PathBuf;
 

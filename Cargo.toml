@@ -20,3 +20,4 @@ lazy_static = "1.0"
 clap = "2.29.4"
 webdav-handler = { path = "../webdav-handler-rs", version = "0.1.0" }
 pam = { path = "pam" }
+fs_quota = { path = "fs_quota" }
