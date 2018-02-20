@@ -26,8 +26,6 @@ use dav::DavHandler;
 
 use libc::{uid_t,gid_t};
 
-use dav::localfs;
-
 mod suidfs;
 mod unixuser;
 mod cache;

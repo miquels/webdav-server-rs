@@ -43,9 +43,6 @@ impl SuidFs {
     fn switch_uid(&self) -> FsResult<UidSwitcher> {
         UidSwitcher::new(self.user_uid, self.user_gid, self.base_uid, self.base_gid)
     }
-    fn fspath(&self, path: &WebPath) -> PathBuf {
-        path.as_pathbuf_with_prefix(&self.basedir)
-    }
 }
 
 #[derive(Debug)]
@@ -158,11 +155,12 @@ impl DavFileSystem for SuidFs {
         self.fs.rename(from, to)
     }
 
-    fn get_quota(&self, path: &WebPath) -> FsResult<(u64, Option<u64>)> {
+    fn get_quota(&self) -> FsResult<(u64, Option<u64>)> {
+        debug!("get_quota called");
         let _guard = UidSwitcher::new(0, 0, self.base_uid, self.base_gid)?;
-        let path = self.fspath(path);
-        let r = FsQuota::check(&path)
-            .or_else(|e| if e == FqError::NoQuota { FsQuota::system(&path) } else { Err(e) })
+        let path = &self.basedir;
+        let r = FsQuota::check(path)
+            .or_else(|e| if e == FqError::NoQuota { FsQuota::system(path) } else { Err(e) })
             .map_err(|_| FsError::GeneralFailure)?;
         Ok((r.bytes_used, r.bytes_limit))
     }
