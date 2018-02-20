@@ -27,6 +27,7 @@ use dav::DavHandler;
 use libc::{uid_t,gid_t};
 
 mod suidfs;
+mod rootfs;
 mod unixuser;
 mod cache;
 mod cached;
@@ -46,7 +47,7 @@ impl Server {
     }
 }
 
-fn authenticate(req: &Request, user: &str) -> Option<(String, uid_t, gid_t, PathBuf)> {
+fn authenticate(req: &Request, user: &str) -> Option<(String, String, uid_t, gid_t, PathBuf)> {
     // we must have a login/pass
     // some nice destructuring going on here eh.
     let (u, p) = match req.headers.get::<Authorization<Basic>>() {
@@ -57,7 +58,7 @@ fn authenticate(req: &Request, user: &str) -> Option<(String, uid_t, gid_t, Path
         )) => (username, password),
         _ => return None,
     };
-    if u != user {
+    if u != user && user != "" {
         return None;
     }
 
@@ -72,7 +73,7 @@ fn authenticate(req: &Request, user: &str) -> Option<(String, uid_t, gid_t, Path
         debug!("pam error {}", e);
         return None;
     }
-    Some(("/".to_string() + u, pwd.uid, pwd.gid, pwd.dir.clone()))
+    Some((u.to_string(), "/".to_string() + u, pwd.uid, pwd.gid, pwd.dir.clone()))
 }
 
 impl Handler for Server {
@@ -92,22 +93,29 @@ impl Handler for Server {
         // NOTE we no not percent-decode here, if this was a real
         // application that would be bad.
         let x = path.splitn(3, "/").collect::<Vec<&str>>();
-        let (prefix, uid, gid, dir) = match authenticate(&req, x[1]) {
+        let (user, prefix, uid, gid, dir) = match authenticate(&req, x[1]) {
             Some(result) => result,
             None => {
                 res.headers_mut().set(WWWAuthenticate(
-                        "Basic realm=\"webdav-lib\"".to_string()));
+                        "Basic realm=\"XS4ALL Webdisk\"".to_string()));
                 *res.status_mut() = StatusCode::Unauthorized;
                 return;
             },
         };
-        debug!("dir {:?}, prefix {}, uid {}, gid {}", dir, prefix, uid, gid);
 
-        // instantiate and run a new handler.
-        let fs = suidfs::SuidFs::new(dir, true, uid, gid, 33, 33);
-        //let fs = localfs::LocalFs::new(dir, true);
-        let dav = DavHandler::new(prefix, fs);
-        dav.handle(req, res);
+        if x[1] == "" {
+            // in "/", create a synthetic home directory.
+            let fs = rootfs::RootFs::new(user, dir, true, uid, gid, 33, 33);
+            let dav = DavHandler::new("/".to_string(), fs)
+                .allow(dav::Method::PropFind)
+                .allow(dav::Method::Options);
+            dav.handle(req, res);
+        } else {
+            // in /user
+            let fs = suidfs::SuidFs::new(dir, true, uid, gid, 33, 33);
+            let dav = DavHandler::new(prefix, fs);
+            dav.handle(req, res);
+        }
     }
 }
 
