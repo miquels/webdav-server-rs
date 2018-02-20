@@ -120,6 +120,11 @@ impl DavFileSystem for SuidFs {
         self.fs.metadata(path)
     }
 
+    fn symlink_metadata(&self, path: &WebPath) -> FsResult<Box<DavMetaData>> {
+        let _guard = self.switch_uid()?;
+        self.fs.symlink_metadata(path)
+    }
+
     fn read_dir(&self, path: &WebPath) -> FsResult<Box<DavReadDir<Item=Box<DavDirEntry>>>> {
         let _guard = self.switch_uid()?;
         let rd = self.fs.read_dir(path)?;
