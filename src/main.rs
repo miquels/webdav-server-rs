@@ -10,12 +10,15 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate lazy_static;
 extern crate env_logger;
+extern crate percent_encoding;
 extern crate webdav_handler;
 extern crate libc;
 extern crate pam;
 extern crate fs_quota;
 
 use std::path::PathBuf;
+
+use percent_encoding::percent_decode;
 
 use hyper::header::{Authorization, Basic};
 use hyper::server::{Handler,Request, Response};
@@ -47,7 +50,7 @@ impl Server {
     }
 }
 
-fn authenticate(req: &Request, user: &str) -> Option<(String, String, uid_t, gid_t, PathBuf)> {
+fn authenticate(req: &Request) -> Option<(String, uid_t, gid_t, PathBuf)> {
     // we must have a login/pass
     // some nice destructuring going on here eh.
     let (u, p) = match req.headers.get::<Authorization<Basic>>() {
@@ -58,9 +61,6 @@ fn authenticate(req: &Request, user: &str) -> Option<(String, String, uid_t, gid
         )) => (username, password),
         _ => return None,
     };
-    if u != user && user != "" {
-        return None;
-    }
 
     // find user.
     let pwd = match cached::getpwnam_cached(u) {
@@ -73,27 +73,25 @@ fn authenticate(req: &Request, user: &str) -> Option<(String, String, uid_t, gid
         debug!("pam error {}", e);
         return None;
     }
-    Some((u.to_string(), "/".to_string() + u, pwd.uid, pwd.gid, pwd.dir.clone()))
+    Some((u.to_string(), pwd.uid, pwd.gid, pwd.dir.clone()))
 }
 
 impl Handler for Server {
 
-    //fn handle<'a, 'k>(&'a self, req: Request<'a, 'k>, mut res: Response<'a>) {
     fn handle(&self, req: Request, mut res: Response) {
 
         // Get request path.
         let path = match req.uri {
             hyper::uri::RequestUri::AbsolutePath(ref s) => s.to_string(),
+            // FIXME handle OPTIONS *
             _ => {
                 *res.status_mut() = StatusCode::BadRequest;
                 return;
             }
         };
 
-        // NOTE we no not percent-decode here, if this was a real
-        // application that would be bad.
-        let x = path.splitn(3, "/").collect::<Vec<&str>>();
-        let (user, prefix, uid, gid, dir) = match authenticate(&req, x[1]) {
+        // authenticate.
+        let (user, uid, gid, dir) = match authenticate(&req) {
             Some(result) => result,
             None => {
                 res.headers_mut().set(WWWAuthenticate(
@@ -103,15 +101,24 @@ impl Handler for Server {
             },
         };
 
-        if x[1] == "" {
+        // get first segment of url.
+        let x = path.splitn(3, "/").collect::<Vec<&str>>();
+        let first_seg = percent_decode(x[1].as_bytes()).decode_utf8_lossy();
+
+        if first_seg == "" {
             // in "/", create a synthetic home directory.
             let fs = rootfs::RootFs::new(user, dir, true, uid, gid, 33, 33);
             let dav = DavHandler::new("/".to_string(), fs)
                 .allow(dav::Method::PropFind)
                 .allow(dav::Method::Options);
             dav.handle(req, res);
+        } else if first_seg != user.as_str() {
+            // in /<something> but doesn't match username.
+            *res.status_mut() = StatusCode::NotFound;
+            return;
         } else {
             // in /user
+            let prefix = "".to_string() + &user;
             let fs = suidfs::SuidFs::new(dir, true, uid, gid, 33, 33);
             let dav = DavHandler::new(prefix, fs);
             dav.handle(req, res);
