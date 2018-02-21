@@ -11,3 +11,6 @@
 - document the PAM webdav config
 - document the nginx config
 
+- rootfs: add serving files for GET
+- parse index.tmpl file
+
