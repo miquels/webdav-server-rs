@@ -32,8 +32,9 @@ impl DavFileSystem for RootFs {
         Box::new((*self).clone())
     }
 
-    fn metadata(&self, path: &WebPath) -> FsResult<Box<DavMetaData>> {
-        self.fs.metadata(path)
+    fn metadata(&self, _path: &WebPath) -> FsResult<Box<DavMetaData>> {
+        let path = WebPath::from_str("/", "").unwrap();
+        self.fs.metadata(&path)
     }
 
     fn read_dir(&self, path: &WebPath) -> FsResult<Box<DavReadDir<Item=Box<DavDirEntry>>>> {

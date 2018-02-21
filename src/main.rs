@@ -100,7 +100,6 @@ impl Handler for Server {
                 return;
             },
         };
-
         // get first segment of url.
         let x = path.splitn(3, "/").collect::<Vec<&str>>();
         let first_seg = percent_decode(x[1].as_bytes()).decode_utf8_lossy();
@@ -118,7 +117,7 @@ impl Handler for Server {
             return;
         } else {
             // in /user
-            let prefix = "".to_string() + &user;
+            let prefix = "/".to_string() + &user;
             let fs = suidfs::SuidFs::new(dir, true, uid, gid, 33, 33);
             let dav = DavHandler::new(prefix, fs);
             dav.handle(req, res);
