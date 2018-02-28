@@ -29,5 +29,9 @@ fn main() {
         .compile("fs_quota");
 
     println!("cargo:rustc-link-lib=rpcsvc");
+
+    println!("cargo:rerun-if-changed=src/rquota.x");
+    println!("cargo:rerun-if-changed=src/quota-linux.c");
+    println!("cargo:rerun-if-changed=src/quota-nfs.c");
 }
 
