@@ -36,7 +36,7 @@ impl DavFileSystem for RootFs {
         let mut v = Vec::new();
         v.push(RootFsDirEntry{
             name:   self.user.clone(),
-            meta:   RefCell::new(Some(self.fs.metadata(path))),
+            meta:   self.fs.metadata(path),
         });
         Ok(Box::new(RootFsReadDir{
             iterator:   v.into_iter(),
@@ -72,14 +72,13 @@ impl Iterator for RootFsReadDir {
 
 #[derive(Debug)]
 struct RootFsDirEntry {
-    meta:       RefCell<Option<FsResult<Box<DavMetaData>>>>,
+    meta:       FsResult<Box<DavMetaData>>,
     name:       String,
 }
 
 impl DavDirEntry for RootFsDirEntry {
     fn metadata(&self) -> FsResult<Box<DavMetaData>> {
-        let mut opt = self.meta.borrow_mut();
-        (*opt).take().unwrap()
+        self.meta.clone()
     }
 
     fn name(&self) -> Vec<u8> {
