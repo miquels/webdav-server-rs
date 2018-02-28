@@ -108,6 +108,7 @@ impl Handler for Server {
             // in "/", create a synthetic home directory.
             let fs = rootfs::RootFs::new(user, dir, true, uid, gid, 33, 33);
             let dav = DavHandler::new("/".to_string(), fs)
+                .allow(dav::Method::Get)
                 .allow(dav::Method::PropFind)
                 .allow(dav::Method::Options);
             dav.handle(req, res);
