@@ -110,11 +110,6 @@ impl Drop for UidSwitcher {
 
 impl DavFileSystem for SuidFs {
 
-    // boilerplate helper so that clone() works.
-    fn box_clone(&self) -> Box<DavFileSystem> {
-        Box::new((*self).clone())
-    }
-
     fn metadata(&self, path: &WebPath) -> FsResult<Box<DavMetaData>> {
         let _guard = self.switch_uid()?;
         self.fs.metadata(path)

@@ -27,11 +27,6 @@ impl RootFs {
 
 impl DavFileSystem for RootFs {
 
-    // boilerplate helper so that clone() works.
-    fn box_clone(&self) -> Box<DavFileSystem> {
-        Box::new((*self).clone())
-    }
-
     fn metadata(&self, _path: &WebPath) -> FsResult<Box<DavMetaData>> {
         let path = WebPath::from_str("/", "").unwrap();
         self.fs.metadata(&path)
