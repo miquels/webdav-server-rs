@@ -1,17 +1,24 @@
 [package]
-name = "pam"
+name = "tokio-pam"
 version = "0.1.0"
 authors = ["Miquel van Smoorenburg <mikevs@xs4all.net>"]
+edition = "2018"
 
 [build-dependencies]
-cc = "1"
+cc = "1.0.28"
 
 [dependencies]
-lazy_static = "1"
-bincode = "1.0.0"
-libc = "0.2.36"
-log = "0.3"
-serde = "1.0.27"
-serde_derive = "1.0.27"
-error-chain = "0.11"
-unix_socket = "0.5"
+bincode = "1.0.1"
+env_logger = "0.6.0"
+error-chain = "0.12.0"
+futures = "0.1.25"
+libc = "0.2.47"
+log = "0.4.6"
+serde = "1.0.84"
+serde_derive = "1.0.84"
+threadpool = "1.7.1"
+tokio = "0.1.14"
+tokio-core = "0.1.17"
+tokio-io = "0.1.11"
+tokio-reactor = "0.1.8"
+tokio-uds = "0.2.5"

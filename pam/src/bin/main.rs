@@ -1,13 +1,20 @@
 #[macro_use] extern crate error_chain;
-extern crate pam;
 
 use std::io::Write;
+
+use env_logger;
+
+use futures::prelude::*;
+use futures::future;
+use tokio;
+
+use tokio_pam;
 
 error_chain! {
     foreign_links {
         NulError(::std::ffi::NulError);
         Io(::std::io::Error);
-        Pam(pam::PamError);
+        Pam(tokio_pam::PamError);
     }
 }
 
@@ -20,15 +27,32 @@ fn prompt(s: &str) -> Result<String> {
 }
 
 fn run() -> Result<()> {
-    //pam::init_worker();
+    env_logger::init();
     let name = prompt("What's your login? ")?;
     let pass = prompt("What's your password? ")?;
-    let res = pam::auth("webdav", &name, &pass, "");
-    if let Err(e) = res {
-        println!("{}", e);
-    } else {
-        println!("OK");
+
+    let fut = future::ok::<(), ()>(())
+        .then(|_| {
+            match tokio_pam::PamAuth::new() {
+                Ok(p) => Ok(p),
+                Err(_e) => {
+                    eprintln!("PamAuth::new() returned error: {}", _e);
+                    Err(())
+                },
+            }
+        }).and_then(move |mut pam| {
+            tokio::spawn(
+                pam.auth("other", &name, &pass, None)
+                    .map(|_res| println!("pam.auth returned Ok({:?})", _res))
+                    .map_err(|_e| println!("pam.auth returned error: {}", _e))
+            )
+        });
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    if let Err(e) = rt.block_on_all(fut) {
+        eprintln!("runtime returned error {:?}", e);
     }
+
     Ok(())
 }
 
