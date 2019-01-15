@@ -17,7 +17,7 @@
 //! Implements the stream::Sink trait.
 //!
 //! Example creating a channel over a UnixStream socketpair:
-//! ```no_run
+//! ```text
 //! let (sock1, sock2) = tokio::net::UnixStream::pair().unwrap();
 //! let tx = stream_channel::sender::<String>(sock1);
 //! let rx = stream_channel::receiver::<String>(sock2);
