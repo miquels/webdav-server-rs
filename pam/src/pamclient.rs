@@ -9,6 +9,7 @@ use std::mem;
 
 use futures::prelude::*;
 use futures::sync::{mpsc, oneshot};
+use futures::try_ready;
 
 use tokio_uds::UnixStream;
 use tokio_io::{self, AsyncRead};
@@ -29,16 +30,16 @@ pub(crate) struct PamRequest {
     pub remip:      Option<String>,
 }
 
-/// Pam authenticator.
-#[derive(Clone)]
-pub struct PamAuth {
-    req_chan:   mpsc::Sender<PamRequest1>,
-}
-
 // sent over request channel to PamAuthTask.
 struct PamRequest1 {
     req:        PamRequest,
     resp_chan:  oneshot::Sender<Result<(), PamError>>,
+}
+
+/// Pam authenticator.
+#[derive(Clone)]
+pub struct PamAuth {
+    req_chan:   mpsc::Sender<PamRequest1>,
 }
 
 impl PamAuth {
@@ -59,7 +60,7 @@ impl PamAuth {
     /// - password: account password
     /// - remoteip: if this is a networking service, the remote IP address of the client.
     pub fn auth(&mut self, service: &str, username: &str, password: &str, remoteip: Option<&str>)
-    -> impl Future<Item=(), Error=PamError>
+    -> PamAuthFuture
     {
         // create request to be sent to the server.
         let req = PamRequest {
@@ -75,25 +76,52 @@ impl PamAuth {
             resp_chan:  tx,
         };
 
-        // send request
-        let fut = self.req_chan.clone().send(req1)
-            .map_err(|_e| {
+        PamAuthFuture {
+            state:      PamAuthState::Request(self.req_chan.clone().send(req1)),
+            resp_rx:    Some(rx),
+        }
+    }
+}
+
+enum PamAuthState {
+    Request(futures::sink::Send<mpsc::Sender<PamRequest1>>),
+    Response(oneshot::Receiver<Result<(), PamError>>),
+}
+
+pub struct PamAuthFuture {
+    state:      PamAuthState,
+    resp_rx:    Option<oneshot::Receiver<Result<(), PamError>>>,
+}
+
+impl Future for PamAuthFuture {
+    type Item = ();
+    type Error = PamError;
+
+    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+
+        // wait for send to complete.
+        if let PamAuthState::Request(ref mut r) = self.state {
+            let _ = try_ready!(r.poll().map_err(|_e| {
                 debug!("PamAuth::auth: send request: error: {}", _e);
                 PamError(ERR_SEND_TO_SERVER)
-            })
-            .and_then(move |_| {
-                // receive response
-                rx.then(|res| {
-                    match res {
-                        Err(e) => {
-                            debug!("PamAuth::auth: receive response: error: {}", e);
-                            Err(PamError(ERR_RECV_FROM_SERVER))
-                        }
-                        Ok(res) => res,
-                    }
-                })
-            });
-        fut
+            }));
+            // set up waiting for response.
+            let resp_rx = self.resp_rx.take().unwrap();
+            self.state = PamAuthState::Response(resp_rx);
+        }
+
+        // poll response channel.
+        if let PamAuthState::Response(ref mut resp_rx) = self.state {
+            let res = try_ready!(resp_rx.poll().map_err(|_e| {
+                debug!("PamAuth::auth: receive_response: error: {}", _e);
+                PamError(ERR_RECV_FROM_SERVER)
+            }));
+            return match res {
+                Ok(res) => Ok(Async::Ready(res)),
+                Err(err) => Err(err),
+            };
+        }
+        unreachable!()
     }
 }
 
