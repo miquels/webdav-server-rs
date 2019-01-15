@@ -30,11 +30,11 @@ use env_logger;
 
 use webdav_handler as dav;
 use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};
-use crate::dav::{DavConfig, DavHandler};
+use crate::dav::{DavConfig, DavHandler, fs::DavFileSystem, localfs::LocalFs, webpath::WebPath};
 
 use crate::quotafs::QuotaFs;
 use crate::rootfs::RootFs;
-use crate::suid::{thread_setreuid, thread_setregid};
+use crate::suid::switch_uid;
 
 #[derive(Clone)]
 struct Server {
@@ -95,69 +95,72 @@ impl Server {
 
         // XXX FIXME handle OPTIONS * (is that being used? check webdisk logs)
 
-        let config = {
-            // get first segment of url.
-            let x = req.uri().path().splitn(3, "/").collect::<Vec<&str>>();
-            if x.len() < 2 {
-                return box_response("Authentication required", StatusCode::UNAUTHORIZED);
-            }
-            let nseg = x.len() - 1;
-            let first_seg = percent_decode(x[1].as_bytes()).decode_utf8_lossy();
+        // get first segment of url.
+        let x = req.uri().path().splitn(3, "/").collect::<Vec<&str>>();
+        if x.len() < 2 {
+            return box_response("Authentication required", StatusCode::UNAUTHORIZED);
+        }
+        let nseg = x.len() - 1;
+        let first_seg = percent_decode(x[1].as_bytes()).decode_utf8_lossy();
+        debug!("* nseg {} x {:?}", nseg, x);
 
-            let config = if nseg < 2 {
-                println!("in / ");
+        // Check if username matches basedir.
+        if nseg >= 2 && first_seg != user.as_str() {
+            // in /<something>/ but doesn't match username.
+            debug!("user {} path {}", first_seg, user);
+            return box_response("Authentication required", StatusCode::UNAUTHORIZED);
+        }
+
+        let config = if nseg < 2 {
+            if first_seg == "" {
                 // in "/", create a synthetic home directory.
+                debug!("in /");
                 let fs = RootFs::new(user.to_string(), &self.directory, true, 0xfffffffe);
                 DavConfig {
                     fs:         Some(fs),
                     principal:  Some(user.to_string()),
                     ..DavConfig::default()
                 }
-            } else if first_seg != user.as_str() {
-                // in /<something>/ but doesn't match username.
-                println!("user {} path {}", first_seg, user);
-                return box_response("Authentication required", StatusCode::UNAUTHORIZED);
             } else {
-                // in /user
-                let uid = pwd.uid;
-                let gid = pwd.gid;
-                let start = move || {
-                    if let Err(e) = thread_setreuid(Some(33), Some(0)) {
-                        panic!("thread_setreuid({}, {}): {}", 33, 0, e);
+                // in "/" asking for specific file.
+                debug!("in root, /{}", first_seg);
+                let fs = LocalFs::new(&self.directory, true);
+                let path = "/".to_string() + &first_seg;
+                let path = WebPath::from_str(&path, "").unwrap();
+                if !fs.metadata(&path).is_ok() {
+                    debug!("/{} does not exist", first_seg);
+                    // file does not exist. If first_seg is a username, return
+                    // 401 Unauthorized, otherwise return 404 Not Found.
+                    if cached::getpwnam_cached(&first_seg).is_ok() {
+                        return box_response("Authentication required", StatusCode::UNAUTHORIZED);
+                    } else {
+                        return box_response("Not found", StatusCode::NOT_FOUND);
                     }
-                    if let Err(e) = thread_setregid(Some(gid), Some(gid)) {
-                        panic!("thread_setregid({}, {}): {}", gid, gid, e);
-                    }
-                    if let Err(e) = thread_setreuid(Some(uid), Some(uid)) {
-                        panic!("thread_setreuid({}, {}): {}", uid, uid, e);
-                    }
-                    debug!("start request-hook")
-                };
-                let uid = pwd.uid;
-                let stop = move || {
-                    if let Err(e) = thread_setreuid(Some(uid), Some(0)) {
-                        panic!("thread_setreuid({}, {}): {}", uid, 0, e);
-                    }
-                    if let Err(e) = thread_setregid(Some(33), Some(33)) {
-                        panic!("thread_setregid({}, {}): {}", 33, 33, e);
-                    }
-                    if let Err(e) = thread_setreuid(Some(33), Some(33)) {
-                        panic!("thread_setreuid({}, {}): {}", 33, 33, e);
-                    }
-                    debug!("start request-hook")
-                };
-                let prefix = "/".to_string() + &user;
-                let fs = QuotaFs::new(&pwd.dir, pwd.uid, true);
-                println!("in userdir {} prefix {} ", user, prefix);
+                }
+                debug!("/{} exists, serving", first_seg);
                 DavConfig {
-                    prefix:     Some(prefix),
                     fs:         Some(fs),
                     principal:  Some(user.to_string()),
-                    reqhooks:   Some((Box::new(start), Box::new(stop))),
                     ..DavConfig::default()
                 }
-            };
-            config
+            }
+        } else {
+            // in /user
+            let uid = pwd.uid;
+            let gid = pwd.gid;
+            let start = move || switch_uid(33, uid, gid);
+            let uid = pwd.uid;
+            let stop = move || switch_uid(uid, 33, gid);
+            let prefix = "/".to_string() + &user;
+            let fs = QuotaFs::new(&pwd.dir, pwd.uid, true);
+            debug!("in userdir {} prefix {} ", user, prefix);
+            DavConfig {
+                prefix:     Some(prefix),
+                fs:         Some(fs),
+                principal:  Some(user.to_string()),
+                reqhooks:   Some((Box::new(start), Box::new(stop))),
+                ..DavConfig::default()
+            }
         };
 
         // transform hyper::Request into http::Request, run handler,
