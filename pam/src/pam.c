@@ -22,7 +22,8 @@ static int c_pam_conv(int num_msg, const struct pam_message **msg,
     struct creds *creds = (struct creds *)appdata;
     int replies = 0;
 
-    for (int count = 0; count < num_msg; count++) {
+    int count;
+    for (count = 0; count < num_msg; count++) {
         switch (msg[count]->msg_style) {
             case PAM_PROMPT_ECHO_ON:
                 add_reply(&reply, replies++, creds->user);
