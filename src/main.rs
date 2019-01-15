@@ -5,145 +5,207 @@
 //  Connect to http://localhost:4918/<DIR>/
 //
 
-#[macro_use] extern crate hyper;
 #[macro_use] extern crate clap;
 #[macro_use] extern crate log;
 #[macro_use] extern crate lazy_static;
+extern crate hyper;
+extern crate http;
+extern crate tokio_pam;
 extern crate env_logger;
 extern crate percent_encoding;
 extern crate webdav_handler;
 extern crate libc;
-extern crate pam;
 extern crate fs_quota;
+extern crate futures;
+extern crate bytes;
 
-use std::path::PathBuf;
-
-use percent_encoding::percent_decode;
-
-use hyper::header::{Authorization, Basic};
-use hyper::server::{Handler,Request, Response};
-use hyper::status::StatusCode;
-
-use webdav_handler as dav;
-use dav::DavHandler;
-
-use libc::{uid_t,gid_t};
-
-mod suidfs;
+mod quotafs;
 mod rootfs;
 mod unixuser;
 mod cache;
 mod cached;
+mod suid;
 
-header! { (WWWAuthenticate, "WWW-Authenticate") => [String] }
+use std::net::SocketAddr;
+use std::str::FromStr;
 
-#[derive(Debug)]
+use percent_encoding::percent_decode;
+use futures::prelude::*;
+//use futures;
+use bytes::Bytes;
+
+//use hyper;
+use http::status::StatusCode;
+
+use webdav_handler as dav;
+use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};
+use crate::dav::{DavConfig, DavHandler};
+
+use crate::quotafs::QuotaFs;
+use crate::rootfs::RootFs;
+use crate::suid::{thread_setresuid, thread_setresgid};
+
+#[derive(Clone)]
 struct Server {
-    directory:      String,
+    dh:         DavHandler,
+    directory:  String,
+}
+
+type BoxedFuture = Box<Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error> + Send>;
+
+fn box_response(msg: &str, code: StatusCode) -> BoxedFuture {
+    let body = futures::stream::once(Ok(Bytes::from(msg)));
+    let body: webdav_handler::BoxedByteStream = Box::new(body);
+    let body = hyper::Body::wrap_stream(body);
+    let mut response = hyper::Response::builder();
+    response.status(code);
+    if code == StatusCode::UNAUTHORIZED {
+        response.header("WWW-Authenticate", "Basic realm=\"XS4ALL Webdisk\"");
+    }
+    let resp = response.body(body).unwrap();
+    return Box::new(futures::future::ok(resp));
 }
 
 impl Server {
-    pub fn new(directory: String) -> Self {
+    pub fn new(rootdir: String) -> Self {
+        let mut methods = dav::AllowedMethods::none();
+        methods.add(dav::Method::Get);
+        methods.add(dav::Method::PropFind);
+        methods.add(dav::Method::Options);
+        let dh = DavHandler::new_with(DavConfig{
+            allow:  Some(methods),
+            ..DavConfig::default()
+        });
         Server{
-            directory:      directory,
+            dh:         dh,
+            directory:  rootdir,
         }
     }
-}
 
-fn authenticate(req: &Request) -> Option<(String, uid_t, gid_t, PathBuf)> {
-    // we must have a login/pass
-    // some nice destructuring going on here eh.
-    let (u, p) = match req.headers.get::<Authorization<Basic>>() {
-        Some(&Authorization(Basic{
-                                ref username,
-                                password: Some(ref password)
+    fn handle(&self, req: hyper::Request<hyper::Body>) -> BoxedFuture {
+
+        // we must have a login/pass
+        let (user, _pass) = match req.headers().typed_get::<Authorization<Basic>>() {
+            Some(Authorization(Basic{
+                                username,
+                                password: Some(password)
                             }
-        )) => (username, password),
-        _ => return None,
-    };
+            )) => (username, password),
+            _ => return box_response("Authentication required", StatusCode::UNAUTHORIZED),
+        };
 
-    // find user.
-    let pwd = match cached::getpwnam_cached(u) {
-        Ok(p) => p,
-        Err(_) => return None,
-    };
+        // see if user exists.
+        let pwd = match cached::getpwnam_cached(&user) {
+            Ok(p) => p,
+            Err(_) => return box_response("Authentication required", StatusCode::UNAUTHORIZED),
+        };
 
-    // authenticate
-    if let Err(e) = cached::pam_auth_cached("webdav", u, p, "") {
-        debug!("pam error {}", e);
-        return None;
-    }
-    Some((u.to_string(), pwd.uid, pwd.gid, pwd.dir.clone()))
-}
+        // XXX FIXME call PAM to authenticate.
 
-impl Handler for Server {
+        // XXX FIXME handle OPTIONS * (is that being used? check webdisk logs)
 
-    fn handle(&self, req: Request, mut res: Response) {
-
-        // Get request path.
-        let path = match req.uri {
-            hyper::uri::RequestUri::AbsolutePath(ref s) => s.to_string(),
-            // FIXME handle OPTIONS *
-            _ => {
-                *res.status_mut() = StatusCode::BadRequest;
-                return;
+        let config = {
+            // get first segment of url.
+            let x = req.uri().path().splitn(3, "/").collect::<Vec<&str>>();
+            if x.len() < 2 {
+                return box_response("Authentication required", StatusCode::UNAUTHORIZED);
             }
+            let nseg = x.len() - 1;
+            let first_seg = percent_decode(x[1].as_bytes()).decode_utf8_lossy();
+
+            let config = if nseg < 2 {
+                println!("in / ");
+                // in "/", create a synthetic home directory.
+                let fs = RootFs::new(user.to_string(), &self.directory, true, 0xfffffffe);
+                DavConfig {
+                    fs:         Some(fs),
+                    principal:  Some(user.to_string()),
+                    ..DavConfig::default()
+                }
+            } else if first_seg != user.as_str() {
+                // in /<something>/ but doesn't match username.
+                println!("user {} path {}", first_seg, user);
+                return box_response("Authentication required", StatusCode::UNAUTHORIZED);
+            } else {
+                // in /user
+                let uid = pwd.uid;
+                let gid = pwd.gid;
+                let start = move || {
+                    if let Err(e) = thread_setresgid(Some(gid), Some(gid), Some(0)) {
+                        panic!("thread_setresgid({}, {}, -1): {}", gid, gid, e);
+                    }
+                    if let Err(e) = thread_setresuid(Some(uid), Some(uid), Some(0)) {
+                        panic!("thread_setresuid({}, {}, -1): {}", uid, uid, e);
+                    }
+                    debug!("start request-hook")
+                };
+                let stop = || {
+                    if let Err(e) = thread_setresgid(Some(33), Some(33), Some(0)) {
+                        panic!("thread_setresgid({}, {}, -1): {}", 33, 33, e);
+                    }
+                    if let Err(e) = thread_setresuid(Some(33), Some(33), Some(0)) {
+                        panic!("thread_setresuid({}, {}, -1): {}", 33, 33, e);
+                    }
+                    debug!("start request-hook")
+                };
+                let prefix = "/".to_string() + &user;
+                let fs = QuotaFs::new(&pwd.dir, pwd.uid, true);
+                println!("in userdir {} prefix {} ", user, prefix);
+                DavConfig {
+                    prefix:     Some(prefix),
+                    fs:         Some(fs),
+                    principal:  Some(user.to_string()),
+                    reqhooks:   Some((Box::new(start), Box::new(stop))),
+                    ..DavConfig::default()
+                }
+            };
+            config
         };
 
-        // authenticate.
-        let (user, uid, gid, dir) = match authenticate(&req) {
-            Some(result) => result,
-            None => {
-                res.headers_mut().set(WWWAuthenticate(
-                        "Basic realm=\"XS4ALL Webdisk\"".to_string()));
-                *res.status_mut() = StatusCode::Unauthorized;
-                return;
-            },
-        };
-        // get first segment of url.
-        let x = path.splitn(3, "/").collect::<Vec<&str>>();
-        let first_seg = percent_decode(x[1].as_bytes()).decode_utf8_lossy();
-
-        if first_seg == "" {
-            // in "/", create a synthetic home directory.
-            let fs = rootfs::RootFs::new(user, dir, true, uid, gid, 33, 33);
-            let dav = DavHandler::new("/".to_string(), fs)
-                .allow(dav::Method::Get)
-                .allow(dav::Method::PropFind)
-                .allow(dav::Method::Options);
-            dav.handle(req, res);
-        } else if first_seg != user.as_str() {
-            // in /<something> but doesn't match username.
-            *res.status_mut() = StatusCode::NotFound;
-            return;
-        } else {
-            // in /user
-            let prefix = "/".to_string() + &user;
-            let fs = suidfs::SuidFs::new(dir, true, uid, gid, 33, 33);
-            let dav = DavHandler::new(prefix, fs);
-            dav.handle(req, res);
-        }
+        // transform hyper::Request into http::Request, run handler,
+        // then transform http::Response into hyper::Response.
+        let (parts, body) = req.into_parts();
+        let body = body.map(|item| Bytes::from(item));
+        let req = http::Request::from_parts(parts, body);
+        let fut = self.dh.handle_with(config, req)
+            .and_then(|resp| {
+                let (parts, body) = resp.into_parts();
+                let body = hyper::Body::wrap_stream(body);
+                Ok(hyper::Response::from_parts(parts, body))
+            });
+        Box::new(fut)
     }
 }
 
-fn main() {
-    env_logger::init().unwrap();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
 
-    let matches = clap_app!(webdav_lib =>
+    let matches = clap_app!(webdav_server =>
         (version: "0.1")
         (@arg PORT: -p --port +takes_value "port to listen on (4918)")
         (@arg DIR: -d --dir +takes_value "local directory to serve")
     ).get_matches();
 
     let dir = matches.value_of("DIR").unwrap_or("/var/tmp");
-    let port = matches.value_of("PORT").unwrap_or("4918");
-    let port = "0.0.0.0:".to_string() + port;
-    let hyper_server = hyper::server::Server::http(&port).unwrap();
+
     let dav_server = Server::new(dir.to_string());
+    let make_service = move || {
+        let dav_server = dav_server.clone();
+        hyper::service::service_fn(move |req| {
+            dav_server.handle(req)
+        })
+    };
 
-    pam::init_worker();
+    let port = matches.value_of("PORT").unwrap_or("4918");
+    let addr = "0.0.0.0:".to_string() + port;
+    let addr = SocketAddr::from_str(&addr)?;
+    let server = hyper::Server::try_bind(&addr)?
+        .serve(make_service)
+        .map_err(|e| eprintln!("server error: {}", e));
 
-    println!("Listening on {}", port);
-    hyper_server.handle_threads(dav_server, 8).unwrap();
+    println!("Serving {} on {}", dir, port);
+    hyper::rt::run(server);
+
+    Ok(())
 }
 

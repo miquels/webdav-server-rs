@@ -3,24 +3,23 @@
 //
 use std;
 use std::path::Path;
-use std::cell::RefCell;
-use libc::{uid_t,gid_t};
+use libc::uid_t;
 use webdav_handler::webpath::WebPath;
 use webdav_handler::fs::*;
 
-use suidfs;
+use crate::quotafs::QuotaFs;
 
 #[derive(Debug,Clone)]
 pub struct RootFs {
     user:       String,
-    fs:         Box<suidfs::SuidFs>,
+    fs:         QuotaFs,
 }
 
 impl RootFs {
-    pub fn new<P: AsRef<Path> + Clone>(user: String, base: P, public: bool, user_uid: uid_t, user_gid: gid_t, base_uid: uid_t, base_gid: gid_t) -> Box<RootFs> {
+    pub fn new<P: AsRef<Path> + Clone>(user: String, base: P, public: bool, user_uid: uid_t) -> Box<RootFs> {
         Box::new(RootFs{
             user:   user,
-            fs:     suidfs::SuidFs::new(base, public, user_uid, user_gid, base_uid, base_gid),
+            fs:     *QuotaFs::new(base, user_uid, public),
         })
     }
 }
@@ -32,7 +31,7 @@ impl DavFileSystem for RootFs {
         self.fs.metadata(&path)
     }
 
-    fn read_dir(&self, path: &WebPath) -> FsResult<Box<DavReadDir<Item=Box<DavDirEntry>>>> {
+    fn read_dir(&self, path: &WebPath) -> FsResult<Box<DavReadDir>> {
         let mut v = Vec::new();
         v.push(RootFsDirEntry{
             name:   self.user.clone(),
@@ -57,7 +56,7 @@ struct RootFsReadDir {
     iterator:   std::vec::IntoIter<RootFsDirEntry>
 }
 
-impl DavReadDir for RootFsReadDir {}
+//impl DavReadDir for RootFsReadDir {}
 
 impl Iterator for RootFsReadDir {
     type Item = Box<DavDirEntry>;
