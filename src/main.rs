@@ -34,7 +34,7 @@ use crate::dav::{DavConfig, DavHandler};
 
 use crate::quotafs::QuotaFs;
 use crate::rootfs::RootFs;
-use crate::suid::{thread_setresuid, thread_setresgid};
+use crate::suid::{thread_setreuid, thread_setregid};
 
 #[derive(Clone)]
 struct Server {
@@ -122,21 +122,27 @@ impl Server {
                 let uid = pwd.uid;
                 let gid = pwd.gid;
                 let start = move || {
-                    if let Err(e) = thread_setresgid(Some(gid), Some(gid), None) {
-                        panic!("thread_setresgid({}, {}, -1): {}", gid, gid, e);
+                    if let Err(e) = thread_setreuid(Some(33), Some(0)) {
+                        panic!("thread_setreuid({}, {}): {}", 33, 0, e);
                     }
-                    if let Err(e) = thread_setresuid(Some(uid), Some(uid), None) {
-                        panic!("thread_setresuid({}, {}, -1): {}", uid, uid, e);
+                    if let Err(e) = thread_setregid(Some(gid), Some(gid)) {
+                        panic!("thread_setregid({}, {}): {}", gid, gid, e);
+                    }
+                    if let Err(e) = thread_setreuid(Some(uid), Some(uid)) {
+                        panic!("thread_setreuid({}, {}): {}", uid, uid, e);
                     }
                     debug!("start request-hook")
                 };
-                let stop = || {
-                    /*
-                    if let Err(e) = thread_setresgid(Some(33), Some(33), None) {
-                        panic!("thread_setresgid({}, {}, -1): {}", 33, 33, e);
-                    }*/
-                    if let Err(e) = thread_setresuid(Some(33), Some(33), None) {
-                        panic!("thread_setresuid({}, {}, -1): {}", 33, 33, e);
+                let uid = pwd.uid;
+                let stop = move || {
+                    if let Err(e) = thread_setreuid(Some(uid), Some(0)) {
+                        panic!("thread_setreuid({}, {}): {}", uid, 0, e);
+                    }
+                    if let Err(e) = thread_setregid(Some(33), Some(33)) {
+                        panic!("thread_setregid({}, {}): {}", 33, 33, e);
+                    }
+                    if let Err(e) = thread_setreuid(Some(33), Some(33)) {
+                        panic!("thread_setreuid({}, {}): {}", 33, 33, e);
                     }
                     debug!("start request-hook")
                 };
