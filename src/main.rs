@@ -122,19 +122,20 @@ impl Server {
                 let uid = pwd.uid;
                 let gid = pwd.gid;
                 let start = move || {
-                    if let Err(e) = thread_setresgid(Some(gid), Some(gid), Some(0)) {
+                    if let Err(e) = thread_setresgid(Some(gid), Some(gid), None) {
                         panic!("thread_setresgid({}, {}, -1): {}", gid, gid, e);
                     }
-                    if let Err(e) = thread_setresuid(Some(uid), Some(uid), Some(0)) {
+                    if let Err(e) = thread_setresuid(Some(uid), Some(uid), None) {
                         panic!("thread_setresuid({}, {}, -1): {}", uid, uid, e);
                     }
                     debug!("start request-hook")
                 };
                 let stop = || {
-                    if let Err(e) = thread_setresgid(Some(33), Some(33), Some(0)) {
+                    /*
+                    if let Err(e) = thread_setresgid(Some(33), Some(33), None) {
                         panic!("thread_setresgid({}, {}, -1): {}", 33, 33, e);
-                    }
-                    if let Err(e) = thread_setresuid(Some(33), Some(33), Some(0)) {
+                    }*/
+                    if let Err(e) = thread_setresuid(Some(33), Some(33), None) {
                         panic!("thread_setresuid({}, {}, -1): {}", 33, 33, e);
                     }
                     debug!("start request-hook")

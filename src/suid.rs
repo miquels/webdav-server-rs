@@ -12,7 +12,7 @@ pub fn thread_setresuid(real: Option<u32>, effective: Option<u32>, saved: Option
     let saved = saved.unwrap_or(UID_NONE);
     match unsafe { syscall(SYS_setresuid, real, effective, saved) } {
         0 => Ok(()),
-        err => Err(io::Error::from_raw_os_error(err as i32)),
+        _ => Err(io::Error::last_os_error()),
     }
 }
 
@@ -24,7 +24,7 @@ pub fn thread_setresgid(real: Option<u32>, effective: Option<u32>, saved: Option
     let saved = saved.unwrap_or(GID_NONE);
     match unsafe { syscall(SYS_setresgid, real, effective, saved) } {
         0 => Ok(()),
-        err => Err(io::Error::from_raw_os_error(err as i32)),
+        _ => Err(io::Error::last_os_error()),
     }
 }
 
