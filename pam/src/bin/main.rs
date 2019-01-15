@@ -57,3 +57,62 @@ fn run() -> Result<()> {
 }
 
 quick_main!(run);
+
+// I've put the tests here in bin/main.rs instead of in lib.rs, because "cargo test"
+// for the library links the tests without -lpam, so it fails. It sucks, because
+// now the test for the magic service "xyzzy-test-test" is always present in src/pam.rs,
+// instead of only during tests.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_pam::{PamAuth, PamError};
+    use futures::future::lazy;
+    use tokio;
+
+    const TEST_STR: &str = "xyzzy-test-test";
+
+    #[test]
+    fn test_auth() {
+        let fut = lazy(move || {
+                let mut pam = PamAuth::new().unwrap();
+                let mut pam2 = pam.clone();
+                pam.auth(TEST_STR, "test", "foo", Some(TEST_STR))
+                    .map_err(|e| {
+                        eprintln!("auth(test) failed: {:?}", e);
+                        e
+                    })
+                    .and_then(move |_| {
+                        pam2.auth(TEST_STR, "unknown", "bar", Some(TEST_STR))
+                            .then(|res| {
+                                match res {
+                                    Ok(()) => {
+                                        eprintln!("auth(unknown) succeeded, should have failed");
+                                        Err(PamError::unknown())
+                                    },
+                                    Err(_) => Ok(()),
+                                }
+                            })
+                    })
+        });
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        assert!(rt.block_on_all(fut).is_ok());
+    }
+
+    #[test]
+    fn test_many() {
+        let fut = lazy(move || {
+            let mut pam = PamAuth::new().unwrap();
+            for i in 1..=1000 {
+                tokio::spawn(
+                    pam.auth(TEST_STR, "test", "bar", Some(TEST_STR))
+                        .map_err(move |e| panic!("auth(test) failed at iteration {}: {:?}", i, e))
+                );
+            }
+            futures::future::ok::<(), ()>(())
+        });
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        assert!(rt.block_on_all(fut).is_ok());
+    }
+}

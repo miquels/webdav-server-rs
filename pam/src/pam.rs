@@ -21,6 +21,13 @@ pub(crate) const ERR_RECV_FROM_SERVER : i32 = 414245;
 #[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
 pub struct PamError(pub(crate) i32);
 
+impl PamError {
+    #[doc(hidden)]
+    pub fn unknown() -> PamError {
+        PamError(13)
+    }
+}
+
 impl std::fmt::Display for PamError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self.0 {
@@ -62,6 +69,15 @@ impl From<std::ffi::NulError> for PamError {
 }
 
 pub(crate) fn pam_auth(service: &str, user: &str, pass: &str, remip: &str) -> Result<(), PamError> {
+
+    if service == "xyzzy-test-test" && remip == "xyzzy-test-test" {
+        return if user == "test" {
+            Ok(())
+        } else {
+            Err(PamError(1))
+        };
+    }
+
     let c_service = CString::new(service)?;
     let c_user = CString::new(user)?;
     let c_pass = CString::new(pass)?;

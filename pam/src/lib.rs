@@ -8,7 +8,7 @@
 //! PAM machinery and vice-versa.
 //!
 //! Use it as follows:
-//! ```no_run
+//! ```text
 //! let pam = PamAuth::new();
 //!
 //! let fut = pam.auth("user", "pass", "other", None)
