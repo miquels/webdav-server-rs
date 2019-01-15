@@ -8,16 +8,6 @@
 #[macro_use] extern crate clap;
 #[macro_use] extern crate log;
 #[macro_use] extern crate lazy_static;
-extern crate hyper;
-extern crate http;
-extern crate tokio_pam;
-extern crate env_logger;
-extern crate percent_encoding;
-extern crate webdav_handler;
-extern crate libc;
-extern crate fs_quota;
-extern crate futures;
-extern crate bytes;
 
 mod quotafs;
 mod rootfs;
@@ -31,11 +21,12 @@ use std::str::FromStr;
 
 use percent_encoding::percent_decode;
 use futures::prelude::*;
-//use futures;
+use futures;
 use bytes::Bytes;
-
-//use hyper;
+use hyper;
+use http;
 use http::status::StatusCode;
+use env_logger;
 
 use webdav_handler as dav;
 use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};

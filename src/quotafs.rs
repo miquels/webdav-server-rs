@@ -5,7 +5,7 @@ use webdav_handler::webpath::WebPath;
 use webdav_handler::fs::*;
 use webdav_handler::localfs::LocalFs;
 
-use crate::fs_quota::*;
+use fs_quota::*;
 use crate::cache;
 
 lazy_static! {
