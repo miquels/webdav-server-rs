@@ -32,10 +32,9 @@ use http::status::StatusCode;
 use env_logger;
 use tokio;
 
+use tokio_pam::PamAuth;
 use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};
 use webdav_handler::{DavConfig, DavHandler, fs::DavFileSystem, localfs::LocalFs, webpath::WebPath};
-
-use tokio_pam::{PamAuth};
 
 use crate::quotafs::QuotaFs;
 use crate::rootfs::RootFs;
@@ -80,15 +79,15 @@ impl Server {
             _ => return Box::new(self.handle_error(StatusCode::UNAUTHORIZED)),
         };
 
-        let mut pam_auth = self.pam_auth.clone();
+        let pam_auth = self.pam_auth.clone();
         let self2 = self.clone();
 
         // start by checking if user exists.
-        let fut = cached::GetPwnamCached::lookup(&user)
+        let fut = cached::User::by_name(&user)
             .map_err(|_| StatusCode::UNAUTHORIZED)
             .and_then(move |pwd| {
                 // authenticate user.
-                pam_auth.auth("other", &pwd.name, &pass, None)
+                cached::PamAuth::auth(pam_auth, "other", &pwd.name, &pass, None)
                     .map_err(|_| StatusCode::UNAUTHORIZED)
                     .map(move |_| pwd)
             })
@@ -144,7 +143,7 @@ impl Server {
         futures::future::ok(resp)
     }
 
-    fn handle_root(&self, req: hyper::Request<hyper::Body>, pwd: Arc<unixuser::Passwd>, first_seg: String)
+    fn handle_root(&self, req: hyper::Request<hyper::Body>, pwd: Arc<unixuser::User>, first_seg: String)
         -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
     {
         if first_seg == "" {
@@ -169,16 +168,22 @@ impl Server {
             let fs = LocalFs::new(&self.directory, true);
             let path = "/".to_string() + &first_seg;
             let path = WebPath::from_str(&path, "").unwrap();
+
             if !fs.metadata(&path).is_ok() {
                 debug!("/{} does not exist", first_seg);
+
                 // file does not exist. If first_seg is a username, return
                 // 401 Unauthorized, otherwise return 404 Not Found.
-                let code = if cached::getpwnam_cached(&first_seg).is_ok() {
-                    StatusCode::UNAUTHORIZED
-                } else {
-                    StatusCode::NOT_FOUND
-                };
-                Either::B(self.handle_error(code))
+                let self2 = self.clone();
+                let fut = cached::User::by_name(&first_seg)
+                    .then(move |res| {
+                        let code = match res {
+                            Ok(_) => StatusCode::UNAUTHORIZED,
+                            Err(_) => StatusCode::NOT_FOUND,
+                        };
+                        self2.handle_error(code)
+                    });
+                Either::B(fut)
             } else {
                 debug!("/{} exists, serving", first_seg);
                 let config = DavConfig {
@@ -191,7 +196,7 @@ impl Server {
         }
     }
 
-    fn handle_user(&self, req: hyper::Request<hyper::Body>, pwd: Arc<unixuser::Passwd>, _first_seg: String)
+    fn handle_user(&self, req: hyper::Request<hyper::Body>, pwd: Arc<unixuser::User>, _first_seg: String)
         -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
     {
         // in /user

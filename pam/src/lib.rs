@@ -24,5 +24,5 @@ mod pamserver;
 mod stream_channel;
 
 pub use crate::pam::PamError;
-pub use crate::pamclient::PamAuth;
+pub use crate::pamclient::{PamAuth, PamAuthFuture};
 
