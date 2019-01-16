@@ -50,6 +50,21 @@ impl PamAuth {
     ///
     /// Note that you must call this from within the tokio runtime.
     pub fn new() -> Result<PamAuth, io::Error> {
+        let (auth, task) = PamAuthTask::start()?;
+        let task = task
+            .map(|_| debug!("PamAuthTask is done."))
+            .map_err(|_e| debug!("PamAuthTask future returned error: {}", _e));
+        debug!("PamAuthTask: spawning task on runtime");
+        tokio::spawn(task);
+        Ok(auth)
+    }
+
+    /// Like new(), but it returns both an authentication handle (PamAuth)
+    /// and a PamAuthTask future to be used later.
+    /// This is useful if you need to instantiate a PamAuth while not in a runtime.
+    ///
+    /// You need to spawn the PamAuthTask on the runtime before using the PamAuth handle.
+    pub fn lazy_new() -> Result<(PamAuth, PamAuthTask), io::Error> {
         PamAuthTask::start()
     }
 
@@ -134,7 +149,8 @@ enum FwdState<T> {
     Eof,
 }
 
-struct PamAuthTask {
+// Future that runs as a task, coordinating things.
+pub struct PamAuthTask {
     // Requests from clients.
     req_rx:     mpsc::Receiver<PamRequest1>,
     // Requests to server
@@ -154,7 +170,7 @@ struct PamAuthTask {
 impl PamAuthTask {
 
     // Start the server process. Then return a handle to send requests on.
-    fn start() -> Result<PamAuth, io::Error> {
+    fn start() -> Result<(PamAuth, PamAuthTask), io::Error> {
 
         // spawn the server process.
         let serversock = PamServer::start()?;
@@ -181,14 +197,8 @@ impl PamAuthTask {
             waiters:    HashMap::new(),
             id_seq:     0,
         };
-        let task = task
-            .map(|_| debug!("PamAuthTask is done."))
-            .map_err(|_e| debug!("PamAuthTask future returned error: {}", _e));
 
-        debug!("PamAuthTask: spawning task on runtime");
-        tokio::spawn(task);
-
-        Ok(PamAuth{ req_chan: req_tx })
+        Ok((PamAuth{ req_chan: req_tx }, task))
     }
 }
 
@@ -262,13 +272,20 @@ impl Future for PamAuthTask {
             state => {
                 let id_seq = &mut self.id_seq;
                 let waiters = &mut self.waiters;
-                self.req_state = forward(&mut self.req_rx, &mut self.srv_tx, state, |item| {
+                let fwd_result = forward(&mut self.req_rx, &mut self.srv_tx, state, |item| {
                     let PamRequest1{ mut req, resp_chan } = item;
                     *id_seq += 1;
                     req.id = *id_seq;
                     waiters.insert(req.id, resp_chan);
                     req
-                })?;
+                });
+                self.req_state = match fwd_result {
+                    Ok(res) => res,
+                    Err(e) => {
+                        debug!("PamAuthTask: {}", e);
+                        return Err(e);
+                    },
+                };
                 match self.req_state {
                     FwdState::Eof => {
                         trace!("PamAuthTask: request channel EOF");
