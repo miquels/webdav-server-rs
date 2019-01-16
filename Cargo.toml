@@ -23,3 +23,5 @@ webdav-handler = { path = "../webdav-handler-rs", version = "0.1.0" }
 http = "0.1.14"
 futures = "0.1.25"
 bytes = "0.4.11"
+tokio-threadpool = "0.1.10"
+tokio = "0.1.14"
