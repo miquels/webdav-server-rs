@@ -129,7 +129,8 @@ impl Server {
     fn handle_error(&self, code: StatusCode)
         -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
     {
-        let msg = format!("<error>{} {}</error>\n", code.as_u16(), code.as_str());
+        let msg = format!("<error>{} {}</error>\n",
+                          code.as_u16(), code.canonical_reason().unwrap_or(""));
         let body = futures::stream::once(Ok(Bytes::from(msg)));
         let body: webdav_handler::BoxedByteStream = Box::new(body);
         let body = hyper::Body::wrap_stream(body);

@@ -1,7 +1,7 @@
-
 use futures::{Future, Poll};
 pub use futures::future::Either;
 
+/// Like future::Either, but with 3 variants.
 pub enum Either3<A, B, C> {
     A(A),
     B(B),
