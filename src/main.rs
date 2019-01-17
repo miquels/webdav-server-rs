@@ -38,7 +38,7 @@ use webdav_handler::{DavConfig, DavHandler, fs::DavFileSystem, localfs::LocalFs,
 
 use crate::quotafs::QuotaFs;
 use crate::rootfs::RootFs;
-use crate::suid::switch_uid;
+use crate::suid::{switch_ugid, thread_switch_ugid};
 use crate::either::*;
 
 #[derive(Clone)]
@@ -203,9 +203,9 @@ impl Server {
         // in /user
         let uid = pwd.uid;
         let gid = pwd.gid;
-        let start = move || switch_uid(33, uid, gid);
+        let start = move || thread_switch_ugid(33, uid, gid);
         let uid = pwd.uid;
-        let stop = move || switch_uid(uid, 33, gid);
+        let stop = move || thread_switch_ugid(uid, 33, gid);
         let prefix = "/".to_string() + &pwd.name;
         let fs = QuotaFs::new(&pwd.dir, pwd.uid, true);
         debug!("in userdir {} prefix {} ", pwd.name, prefix);
@@ -263,6 +263,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server = hyper::Server::try_bind(&addr)?
         .serve(make_service)
         .map_err(|e| eprintln!("server error: {}", e));
+
+    // drop privs.
+    switch_ugid(0, 33, 33);
 
     let mut rt = tokio::runtime::Runtime::new()?;
     rt.spawn(pam_task.map_err(|_e| debug!("pam_task returned error {}", _e)));
