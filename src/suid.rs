@@ -21,35 +21,36 @@ mod setuid {
     use libc::{uid_t, gid_t, SYS_setgid};
     use self::uid32::*;
     use super::{DROP_AUX_GROUPS, drop_aux_groups, last_os_error};
+    const NONE: uid_t = 0xffffffff;
 
     /// Switch process credentials.
     #[allow(dead_code)]
-    pub fn switch_ugid(from_uid: u32, to_uid: u32, gid: u32) {
+    pub fn switch_ugid(uid: u32, gid: u32) {
         DROP_AUX_GROUPS.call_once(drop_aux_groups);
         unsafe {
-            if libc::setresuid(from_uid as uid_t, 0, 0) != 0 {
-                panic!("libc::setresuid({}, {}, 0): {:?}", from_uid, 0, last_os_error());
+            if libc::setresuid(NONE, 0, NONE) != 0 {
+                panic!("libc::setresuid(-1, 0, -1): {:?}", last_os_error());
             }
             if libc::setgid(gid as gid_t) != 0 {
                 panic!("libc::setgid({}): {:?}", gid, last_os_error());
             }
-            if libc::setresuid(to_uid as uid_t, to_uid as uid_t, 0) != 0 {
-                panic!("libc::setresuid({}, {}, 0): {:?}", to_uid, to_uid, last_os_error());
+            if libc::setresuid(uid as uid_t, uid as uid_t, 0) != 0 {
+                panic!("libc::setresuid({}, {}, 0): {:?}", uid, uid, last_os_error());
             }
         }
     }
 
     /// Switch thread credentials.
-    pub fn thread_switch_ugid(from_uid: u32, to_uid: u32, gid: u32) {
+    pub fn thread_switch_ugid(uid: u32, gid: u32) {
         unsafe {
-            if libc::syscall(SYS_setresuid, from_uid as uid_t, 0, 0) != 0 {
-                panic!("syscall(SYS_setresuid, {}, {}, 0): {:?}", from_uid, 0, last_os_error());
+            if libc::syscall(SYS_setresuid, NONE, 0, NONE) != 0 {
+                panic!("syscall(SYS_setresuid, -1, 0, -1): {:?}", last_os_error());
             }
             if libc::syscall(SYS_setgid, gid as gid_t) != 0 {
                 panic!("syscall(SYS_setgid, {}): {:?}", gid, last_os_error());
             }
-            if libc::syscall(SYS_setresuid, to_uid as uid_t, to_uid as uid_t, 0) != 0 {
-                panic!("syscall(SYS_setreuid, {}, {}, 0): {:?}", to_uid, to_uid, last_os_error());
+            if libc::syscall(SYS_setresuid, uid as uid_t, uid as uid_t, 0) != 0 {
+                panic!("syscall(SYS_setreuid, {}, {}, 0): {:?}", uid, uid, last_os_error());
             }
         }
     }
@@ -59,20 +60,21 @@ mod setuid {
 mod setuid {
     use libc::{syscall, setreuid, setgid, uid_t, gid_t};
     use super::{DROP_AUX_GROUPS, drop_aux_groups, last_os_error};
+    const NONE: uid_t = 0xffffffff;
 
     /// Switch process credentials.
     #[allow(dead_code)]
-    pub fn switch_ugid(from_uid: u32, to_uid: u32, gid: u32) {
+    pub fn switch_ugid(uid: u32, gid: u32) {
         DROP_AUX_GROUPS.call_once(drop_aux_groups);
         unsafe {
-            if libc::setreuid(from_uid as uid_t, 0) != 0 {
-                panic!("libc::setreuid({}, {}): {:?}", from_uid, 0, last_os_error());
+            if libc::setreuid(NONE, 0) != 0 {
+                panic!("libc::setreuid(-1, 0): {:?}", last_os_error());
             }
             if libc::setgid(gid as gid_t) != 0 {
                 panic!("libc::setgid({}): {:?}", gid, last_os_error());
             }
-            if libc::setreuid(from_uid as uid_t, to_uid as uid_t) != 0 {
-                panic!("libc::setreuid({}, {}): {:?}", from_uid, to_uid, last_os_error());
+            if libc::setreuid(0, uid as uid_t) != 0 {
+                panic!("libc::setreuid(0, {}): {:?}", uid, last_os_error());
             }
         }
     }
@@ -84,7 +86,7 @@ mod setuid {
     // switch the uids of all threads.
     //
     /// Switch thread credentials. Not implemented!
-    pub fn thread_switch_ugid(from_uid: u32, to_uid: u32, gid: u32) {
+    pub fn thread_switch_ugid(uid: u32, gid: u32) {
         unimplemented!();
     }
 }
