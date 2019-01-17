@@ -37,7 +37,8 @@ impl PamServer {
         // fork server.
         let pid = unsafe { libc::fork() };
         if pid < 0 {
-            panic!("could not fork!");
+            let err = io::Error::last_os_error();
+            return Err(io::Error::new(io::ErrorKind::Other, format!("fork: {}", err)));
         }
         if pid == 0 {
             // child process.

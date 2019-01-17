@@ -106,7 +106,7 @@ impl<T> Stream for Receiver<T>
                 mem::swap(&mut self.state, &mut s);
                 Ok(Async::Ready(Some(res)))
             },
-            _ => panic!(),
+            _ => unreachable!(),
         }
     }
 }
@@ -178,7 +178,7 @@ impl<T> Sink for Sender<T>
             SendState::Ready(strm) => {
                 self.state = SendState::Writing(write_all(strm, data));
             },
-            _ => panic!(),
+            _ => unreachable!(),
         }
 
         Ok(AsyncSink::Ready)
@@ -199,7 +199,7 @@ impl<T> Sink for Sender<T>
                     SendState::Writing(write_all(strm, data))
                 },
                 SendState::Writing(w) => SendState::Writing(w),
-                SendState::Empty => panic!(),
+                SendState::Empty => unreachable!(),
             };
         }
 
@@ -214,7 +214,7 @@ impl<T> Sink for Sender<T>
                     Err(e) => return Err(e),
                 }
             }
-            SendState::Empty => panic!(),
+            SendState::Empty => unreachable!(),
         };
         self.state = SendState::Ready(strm);
         Ok(Async::Ready(()))
