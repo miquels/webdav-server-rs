@@ -100,12 +100,11 @@ impl Server {
                 }
                 let nseg = x.len() - 1;
                 let first_seg = percent_decode(x[1].as_bytes()).decode_utf8_lossy().into_owned();
-                debug!("* nseg {} x {:?}", nseg, x);
 
                 // Check if username matches basedir.
                 if nseg >= 2 && first_seg != user.as_str() {
                     // in /<something>/ but doesn't match username.
-                    debug!("user {} path {}", first_seg, user);
+                    debug!("Server::handle: user {} path /{} -> 401", user, first_seg);
                     return Err(StatusCode::UNAUTHORIZED);
                 }
 
@@ -149,7 +148,7 @@ impl Server {
     {
         if first_seg == "" {
             // in "/", create a synthetic home directory.
-            debug!("in /");
+            debug!("Server::handle_root: /");
             let fs = RootFs::new(pwd.name.clone(), &self.directory, true, 0xfffffffe);
             let config = DavConfig {
                 fs:         Some(fs),
@@ -165,13 +164,12 @@ impl Server {
             // However the rootfs is a local directory, and linux inode/dirent caching
             // is excellent, so we do not bother at this time.
             //
-            debug!("in root, /{}", first_seg);
             let fs = LocalFs::new(&self.directory, true);
             let path = "/".to_string() + &first_seg;
             let path = WebPath::from_str(&path, "").unwrap();
 
             if !fs.metadata(&path).is_ok() {
-                debug!("/{} does not exist", first_seg);
+                debug!("Server::handle_root: /{} does not exist", first_seg);
 
                 // file does not exist. If first_seg is a username, return
                 // 401 Unauthorized, otherwise return 404 Not Found.
@@ -186,7 +184,7 @@ impl Server {
                     });
                 Either::B(fut)
             } else {
-                debug!("/{} exists, serving", first_seg);
+                debug!("Server::handle_root: /{} exists, serving", first_seg);
                 let config = DavConfig {
                     fs:         Some(fs),
                     principal:  Some(pwd.name.to_string()),
@@ -207,7 +205,7 @@ impl Server {
         let stop = move || thread_switch_ugid(33, 33);
         let prefix = "/".to_string() + &pwd.name;
         let fs = QuotaFs::new(&pwd.dir, pwd.uid, true);
-        debug!("in userdir {} prefix {} ", pwd.name, prefix);
+        debug!("Server::handle_user: in userdir {} prefix {} ", pwd.name, prefix);
         let config = DavConfig {
             prefix:     Some(prefix),
             fs:         Some(fs),
