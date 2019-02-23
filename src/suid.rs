@@ -20,22 +20,31 @@ mod setuid {
     }
     use libc::{uid_t, gid_t, SYS_setgid};
     use self::uid32::*;
+    use std::cell::RefCell;
     use super::{DROP_AUX_GROUPS, drop_aux_groups, last_os_error};
     const NONE: uid_t = 0xffffffff;
+
+    thread_local!(static CURRENT_UGID: RefCell<(u32, u32)> = RefCell::new((NONE, NONE)));
 
     /// Switch process credentials.
     #[allow(dead_code)]
     pub fn switch_ugid(uid: u32, gid: u32) {
         DROP_AUX_GROUPS.call_once(drop_aux_groups);
-        unsafe {
-            if libc::setresuid(NONE, 0, NONE) != 0 {
-                panic!("libc::setresuid(-1, 0, -1): {:?}", last_os_error());
-            }
-            if libc::setgid(gid as gid_t) != 0 {
-                panic!("libc::setgid({}): {:?}", gid, last_os_error());
-            }
-            if libc::setresuid(uid as uid_t, uid as uid_t, 0) != 0 {
-                panic!("libc::setresuid({}, {}, 0): {:?}", uid, uid, last_os_error());
+        CURRENT_UGID.with(|cur| {
+            let (cur_uid, cur_gid) = *cur.borrow();
+            if uid != cur_uid || gid != cur_gid {
+                unsafe {
+                    if libc::setresuid(NONE, 0, NONE) != 0 {
+                        panic!("libc::setresuid(-1, 0, -1): {:?}", last_os_error());
+                    }
+                    if libc::setgid(gid as gid_t) != 0 {
+                        panic!("libc::setgid({}): {:?}", gid, last_os_error());
+                    }
+                    if libc::setresuid(uid as uid_t, uid as uid_t, 0) != 0 {
+                        panic!("libc::setresuid({}, {}, 0): {:?}", uid, uid, last_os_error());
+                    }
+                }
+                *cur.borrow_mut() = (uid, gid);
             }
         }
     }
