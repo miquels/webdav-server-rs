@@ -4,12 +4,13 @@
 //  Listens on localhost:4918, plain http, no ssl.
 //  Connect to http://localhost:4918/<DIR>/
 //
+#![feature(async_await, await_macro, futures_api)]
 
 #[macro_use] extern crate clap;
 #[macro_use] extern crate log;
 #[macro_use] extern crate lazy_static;
 
-mod quotafs;
+mod userfs;
 mod rootfs;
 mod unixuser;
 mod cache;
@@ -34,17 +35,19 @@ use tokio;
 
 use tokio_pam::PamAuth;
 use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};
-use webdav_handler::{DavConfig, DavHandler, fs::DavFileSystem, localfs::LocalFs, webpath::WebPath};
+use webdav_handler::{DavConfig, DavHandler, localfs::LocalFs};
 
-use crate::quotafs::QuotaFs;
+use crate::userfs::UserFs;
 use crate::rootfs::RootFs;
-use crate::suid::{switch_ugid, thread_switch_ugid};
+use crate::suid::switch_ugid;
 use crate::either::*;
 
 #[derive(Clone)]
 struct Server {
     dh:         DavHandler,
     directory:  String,
+    uid:        u32,
+    gid:        u32,
     pam_auth:   PamAuth,
 }
 
@@ -64,6 +67,8 @@ impl Server {
             dh:         dh,
             directory:  rootdir,
             pam_auth:   auth,
+            uid:        33,
+            gid:        33,
         }
     }
 
@@ -149,7 +154,7 @@ impl Server {
         if first_seg == "" {
             // in "/", create a synthetic home directory.
             debug!("Server::handle_root: /");
-            let fs = RootFs::new(pwd.name.clone(), &self.directory, true, 0xfffffffe);
+            let fs = RootFs::new(pwd.name.clone(), &self.directory, true, self.uid, self.gid);
             let config = DavConfig {
                 fs:         Some(fs),
                 principal:  Some(pwd.name.to_string()),
@@ -158,17 +163,13 @@ impl Server {
             Either::A(self.run_davhandler(req, config))
         } else {
             // in "/" asking for specific file.
-            //
-            // FIXME: since we do not have an async/futures-based FileSystem yet,
-            // we should run this on a threadpool, or use tokio_threadpool::blocking.
-            // However the rootfs is a local directory, and linux inode/dirent caching
-            // is excellent, so we do not bother at this time.
-            //
             let fs = LocalFs::new(&self.directory, true);
-            let path = "/".to_string() + &first_seg;
-            let path = WebPath::from_str(&path, "").unwrap();
 
-            if !fs.metadata(&path).is_ok() {
+            // FIXME: make async.
+            let mut path = std::path::PathBuf::from(&self.directory);
+            path.push(&first_seg);
+
+            if !std::fs::metadata(&path).is_ok() {
                 debug!("Server::handle_root: /{} does not exist", first_seg);
 
                 // file does not exist. If first_seg is a username, return
@@ -199,18 +200,13 @@ impl Server {
         -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
     {
         // in /user
-        let uid = pwd.uid;
-        let gid = pwd.gid;
-        let start = move || thread_switch_ugid(uid, gid);
-        let stop = move || thread_switch_ugid(33, 33);
         let prefix = "/".to_string() + &pwd.name;
-        let fs = QuotaFs::new(&pwd.dir, pwd.uid, true);
+        let fs = UserFs::new(&pwd.dir, Some((pwd.uid, pwd.gid)), true);
         debug!("Server::handle_user: in userdir {} prefix {} ", pwd.name, prefix);
         let config = DavConfig {
             prefix:     Some(prefix),
             fs:         Some(fs),
             principal:  Some(pwd.name.to_string()),
-            reqhooks:   Some((Box::new(start), Box::new(stop))),
             ..DavConfig::default()
         };
         self.run_davhandler(req, config)

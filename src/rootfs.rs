@@ -3,50 +3,56 @@
 //
 use std;
 use std::path::Path;
-use libc::uid_t;
+use std::pin::Pin;
+
+use futures03::{FutureExt,Stream};
+
 use webdav_handler::webpath::WebPath;
 use webdav_handler::fs::*;
 
-use crate::quotafs::QuotaFs;
+use crate::userfs::UserFs;
 
-#[derive(Debug,Clone)]
+#[derive(Clone)]
 pub struct RootFs {
     user:       String,
-    fs:         QuotaFs,
+    fs:         UserFs,
 }
 
 impl RootFs {
-    pub fn new<P: AsRef<Path> + Clone>(user: String, base: P, public: bool, user_uid: uid_t) -> Box<RootFs> {
+    pub fn new<P: AsRef<Path> + Clone>(user: String, base: P, public: bool, uid: u32, gid: u32) -> Box<RootFs> {
         Box::new(RootFs{
             user:   user,
-            fs:     *QuotaFs::new(base, user_uid, public),
+            fs:     *UserFs::new(base, Some((uid, gid)), public),
         })
     }
 }
 
 impl DavFileSystem for RootFs {
 
-    fn metadata(&self, _path: &WebPath) -> FsResult<Box<DavMetaData>> {
-        let path = WebPath::from_str("/", "").unwrap();
-        self.fs.metadata(&path)
+    fn metadata<'a>(&'a self, _path: &'a WebPath) -> FsFuture<Box<DavMetaData>> {
+        async move {
+            let path = WebPath::from_str("/", "").unwrap();
+            await!(self.fs.metadata(&path))
+        }.boxed()
     }
 
-    fn read_dir(&self, path: &WebPath) -> FsResult<Box<DavReadDir>> {
-        let mut v = Vec::new();
-        v.push(RootFsDirEntry{
-            name:   self.user.clone(),
-            meta:   self.fs.metadata(path),
-        });
-        Ok(Box::new(RootFsReadDir{
-            iterator:   v.into_iter(),
-        }))
+    fn read_dir<'a>(&'a self, path: &'a WebPath, _meta: ReadDirMeta) -> FsFuture<Pin<Box<Stream<Item=Box<DavDirEntry>> + Send>>> {
+        Box::pin(async move {
+            let mut v = Vec::new();
+            v.push(RootFsDirEntry{
+                name:   self.user.clone(),
+                meta:   await!(self.fs.metadata(path)),
+            });
+            let strm = futures03::stream::iter(RootFsReadDir{ iterator: v.into_iter() });
+            Ok(Box::pin(strm) as Pin<Box<Stream<Item=Box<DavDirEntry>> + Send>>)
+        })
     }
 
-    fn open(&self, _path: &WebPath, _options: OpenOptions) -> FsResult<Box<DavFile>> {
-        Err(FsError::NotImplemented)
+    fn open(&self, _path: &WebPath, _options: OpenOptions) -> FsFuture<Box<DavFile>> {
+        Box::pin(futures03::future::ready(Err(FsError::NotImplemented)))
     }
 
-    fn get_quota(&self) -> FsResult<(u64, Option<u64>)> {
+    fn get_quota(&self) -> FsFuture<(u64, Option<u64>)> {
         self.fs.get_quota()
     }
 }
@@ -55,8 +61,6 @@ impl DavFileSystem for RootFs {
 struct RootFsReadDir {
     iterator:   std::vec::IntoIter<RootFsDirEntry>
 }
-
-//impl DavReadDir for RootFsReadDir {}
 
 impl Iterator for RootFsReadDir {
     type Item = Box<DavDirEntry>;
@@ -76,16 +80,16 @@ struct RootFsDirEntry {
 }
 
 impl DavDirEntry for RootFsDirEntry {
-    fn metadata(&self) -> FsResult<Box<DavMetaData>> {
-        self.meta.clone()
+    fn metadata(&self) -> FsFuture<Box<DavMetaData>> {
+        Box::pin(futures03::future::ready(self.meta.clone()))
     }
 
     fn name(&self) -> Vec<u8> {
         self.name.as_bytes().to_vec()
     }
 
-    fn is_dir(&self) -> FsResult<bool> {
-        Ok(true)
+    fn is_dir(&self) -> FsFuture<bool> {
+        Box::pin(futures03::future::ready(Ok(true)))
     }
 }
 
