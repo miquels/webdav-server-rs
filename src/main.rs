@@ -35,7 +35,7 @@ use tokio;
 
 use tokio_pam::PamAuth;
 use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};
-use webdav_handler::{DavConfig, DavHandler, localfs::LocalFs};
+use webdav_handler::{DavConfig, DavHandler, localfs::LocalFs, fakels::FakeLs};
 
 use crate::userfs::UserFs;
 use crate::rootfs::RootFs;
@@ -74,6 +74,20 @@ impl Server {
 
     fn handle(&self, req: hyper::Request<hyper::Body>) -> BoxedFuture {
 
+        // get first segment of url.
+        let x = req.uri().path().splitn(3, "/").collect::<Vec<&str>>();
+        if x.len() < 2 {
+            // can't happen, means there was no "/" in the path.
+            return Box::new(self.handle_error(StatusCode::UNAUTHORIZED));
+        }
+        let nseg = x.len() - 1;
+        let first_seg = percent_decode(x[1].as_bytes()).decode_utf8_lossy().into_owned();
+
+        // If we ask for "/" or "/file" with GET or HEAD, serve from local fs.
+        if nseg == 1 && (req.method() == &http::Method::GET || req.method() == &http::Method::HEAD) {
+            return Box::new(self.handle_realroot(req, first_seg));
+        }
+
         // we must have a login/pass
         let (user, pass) = match req.headers().typed_get::<Authorization<Basic>>() {
             Some(Authorization(Basic{
@@ -96,35 +110,26 @@ impl Server {
                     .map_err(|_| StatusCode::UNAUTHORIZED)
                     .map(move |_| pwd)
             })
-            .and_then(move |pwd| {
+            .then(move |res| {
 
-                // get first segment of url.
-                let x = req.uri().path().splitn(3, "/").collect::<Vec<&str>>();
-                if x.len() < 2 {
-                    return Err(StatusCode::UNAUTHORIZED);
-                }
-                let nseg = x.len() - 1;
-                let first_seg = percent_decode(x[1].as_bytes()).decode_utf8_lossy().into_owned();
+                // handle errors.
+                let pwd = match res {
+                    Err(e) => return Either3::A(self2.handle_error(e)),
+                    Ok(res) => res,
+                };
 
                 // Check if username matches basedir.
                 if nseg >= 2 && first_seg != user.as_str() {
                     // in /<something>/ but doesn't match username.
                     debug!("Server::handle: user {} path /{} -> 401", user, first_seg);
-                    return Err(StatusCode::UNAUTHORIZED);
+                    return Either3::A(self2.handle_error(StatusCode::UNAUTHORIZED));
                 }
 
-                Ok((req, pwd, first_seg, nseg))
-            }).then(move |res| {
-
-                let (req, pwd, first_seg, nseg) = match res {
-                    Err(e) => return Either3::A(self2.handle_error(e)),
-                    Ok(res) => res,
-                };
-
+                // either virtual root or userfs.
                 if nseg < 2 {
-                    Either3::B(self2.handle_root(req, pwd, first_seg))
+                    Either3::B(self2.handle_root(req, pwd))
                 } else {
-                    Either3::C(self2.handle_user(req, pwd, first_seg))
+                    Either3::C(self2.handle_user(req, pwd))
                 }
             });
         Box::new(fut)
@@ -135,77 +140,88 @@ impl Server {
     {
         let msg = format!("<error>{} {}</error>\n",
                           code.as_u16(), code.canonical_reason().unwrap_or(""));
-        let body = futures::stream::once(Ok(Bytes::from(msg)));
-        let body: webdav_handler::BoxedByteStream = Box::new(body);
-        let body = hyper::Body::wrap_stream(body);
         let mut response = hyper::Response::builder();
         response.status(code);
         response.header("Content-Type", "text/xml");
         if code == StatusCode::UNAUTHORIZED {
             response.header("WWW-Authenticate", "Basic realm=\"XS4ALL Webdisk\"");
         }
-        let resp = response.body(body).unwrap();
+        let resp = response.body(msg.into()).unwrap();
         futures::future::ok(resp)
     }
 
-    fn handle_root(&self, req: hyper::Request<hyper::Body>, pwd: Arc<unixuser::User>, first_seg: String)
+    fn handle_redirect(&self, path: String)
         -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
     {
-        if first_seg == "" {
-            // in "/", create a synthetic home directory.
-            debug!("Server::handle_root: /");
-            let fs = RootFs::new(pwd.name.clone(), &self.directory, true, self.uid, self.gid);
-            let config = DavConfig {
-                fs:         Some(fs),
-                principal:  Some(pwd.name.to_string()),
-                ..DavConfig::default()
-            };
-            Either::A(self.run_davhandler(req, config))
-        } else {
-            // in "/" asking for specific file.
-            let fs = LocalFs::new(&self.directory, true);
-
-            // FIXME: make async.
-            let mut path = std::path::PathBuf::from(&self.directory);
-            path.push(&first_seg);
-
-            if !std::fs::metadata(&path).is_ok() {
-                debug!("Server::handle_root: /{} does not exist", first_seg);
-
-                // file does not exist. If first_seg is a username, return
-                // 401 Unauthorized, otherwise return 404 Not Found.
-                let self2 = self.clone();
-                let fut = cached::User::by_name(&first_seg)
-                    .then(move |res| {
-                        let code = match res {
-                            Ok(_) => StatusCode::UNAUTHORIZED,
-                            Err(_) => StatusCode::NOT_FOUND,
-                        };
-                        self2.handle_error(code)
-                    });
-                Either::B(fut)
-            } else {
-                debug!("Server::handle_root: /{} exists, serving", first_seg);
-                let config = DavConfig {
-                    fs:         Some(fs),
-                    principal:  Some(pwd.name.to_string()),
-                    ..DavConfig::default()
-                };
-                Either::A(self.run_davhandler(req, config))
-            }
-        }
+        let resp = hyper::Response::builder()
+            .status(302)
+            .header("content-type", "text/plain")
+            .header("location", path)
+            .body("302 Moved\n".into()).unwrap();
+        futures::future::ok(resp)
     }
 
-    fn handle_user(&self, req: hyper::Request<hyper::Body>, pwd: Arc<unixuser::User>, _first_seg: String)
+    fn handle_realroot(&self, req: hyper::Request<hyper::Body>, first_seg: String)
+        -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
+    {
+        let self2 = self.clone();
+        let mut req = req;
+
+        // If this part of the path is a valid user, redirect.
+        // Otherwise serve from the local filesystem.
+        cached::User::by_name(&first_seg)
+            .then(move |res| {
+                match res {
+                    Ok(_) => {
+                        debug!("Server::handle_realroot: redirect to /{}/", first_seg);
+                        Either::A(self2.handle_redirect("/".to_string() + &first_seg + "/"))
+                    },
+                    Err(_) => {
+                        if first_seg == "" {
+                            let mut parts = req.uri().clone().into_parts();
+                            let pq = http::uri::PathAndQuery::from_static("/index.html");
+                            parts.path_and_query = Some(pq);
+                            *req.uri_mut() = http::uri::Uri::from_parts(parts).unwrap();
+                        }
+                        debug!("Server::handle_realroot: serving {:?}", req.uri());
+                        let fs = LocalFs::new(&self2.directory, true);
+                        let config = DavConfig {
+                            fs:         Some(fs),
+                            ..DavConfig::default()
+                        };
+                        Either::B(self2.run_davhandler(req, config))
+                    }
+                }
+            })
+    }
+
+    fn handle_root(&self, req: hyper::Request<hyper::Body>, pwd: Arc<unixuser::User>)
+        -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
+    {
+        debug!("Server::handle_root: /");
+        let fs = RootFs::new(pwd.name.clone(), &pwd.dir, pwd.uid, pwd.gid);
+        let ls = FakeLs::new();
+        let config = DavConfig {
+            fs:         Some(fs),
+            ls:         Some(ls),
+            principal:  Some(pwd.name.to_string()),
+            ..DavConfig::default()
+        };
+        self.run_davhandler(req, config)
+    }
+
+    fn handle_user(&self, req: hyper::Request<hyper::Body>, pwd: Arc<unixuser::User>)
         -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
     {
         // in /user
         let prefix = "/".to_string() + &pwd.name;
         let fs = UserFs::new(&pwd.dir, Some((pwd.uid, pwd.gid)), true);
+        let ls = FakeLs::new();
         debug!("Server::handle_user: in userdir {} prefix {} ", pwd.name, prefix);
         let config = DavConfig {
             prefix:     Some(prefix),
             fs:         Some(fs),
+            ls:         Some(ls),
             principal:  Some(pwd.name.to_string()),
             ..DavConfig::default()
         };

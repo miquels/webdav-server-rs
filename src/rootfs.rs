@@ -1,5 +1,7 @@
 //
-//  Root filesystem, only shows logged in users' homedir.
+//  Virtual Root filesystem for PROPFIND. 
+//
+//  Shows "/" and "/user".
 //
 use std;
 use std::path::Path;
@@ -19,23 +21,29 @@ pub struct RootFs {
 }
 
 impl RootFs {
-    pub fn new<P: AsRef<Path> + Clone>(user: String, base: P, public: bool, uid: u32, gid: u32) -> Box<RootFs> {
+    pub fn new<P: AsRef<Path> + Clone>(user: String, base: P, uid: u32, gid: u32) -> Box<RootFs> {
         Box::new(RootFs{
             user:   user,
-            fs:     *UserFs::new(base, Some((uid, gid)), public),
+            fs:     *UserFs::new(base, Some((uid, gid)), false),
         })
     }
 }
 
 impl DavFileSystem for RootFs {
 
-    fn metadata<'a>(&'a self, _path: &'a WebPath) -> FsFuture<Box<DavMetaData>> {
+    // Only allow "/" or "/user", for both return the metadata of the UserFs root.
+    fn metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<DavMetaData>> {
         async move {
+            let b = path.as_bytes();
+            if b != b"/" && b != self.user.as_bytes() {
+                return Err(FsError::NotFound);
+            }
             let path = WebPath::from_str("/", "").unwrap();
             await!(self.fs.metadata(&path))
         }.boxed()
     }
 
+    // Only return one entry: "user".
     fn read_dir<'a>(&'a self, path: &'a WebPath, _meta: ReadDirMeta) -> FsFuture<Pin<Box<Stream<Item=Box<DavDirEntry>> + Send>>> {
         Box::pin(async move {
             let mut v = Vec::new();
@@ -48,10 +56,12 @@ impl DavFileSystem for RootFs {
         })
     }
 
+    // cannot open any files.
     fn open(&self, _path: &WebPath, _options: OpenOptions) -> FsFuture<Box<DavFile>> {
         Box::pin(futures03::future::ready(Err(FsError::NotImplemented)))
     }
 
+    // forward quota.
     fn get_quota(&self) -> FsFuture<(u64, Option<u64>)> {
         self.fs.get_quota()
     }
