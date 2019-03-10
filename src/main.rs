@@ -102,11 +102,11 @@ impl Server {
         let self2 = self.clone();
 
         // start by checking if user exists.
-        let fut = cached::User::by_name(&user)
+        let fut = cached::CachedUser::by_name(&user)
             .map_err(|_| StatusCode::UNAUTHORIZED)
             .and_then(move |pwd| {
                 // authenticate user.
-                cached::PamAuth::auth(pam_auth, "other", &pwd.name, &pass, None)
+                cached::CachedPamAuth::auth(pam_auth, "other", &pwd.name, &pass, None)
                     .map_err(|_| StatusCode::UNAUTHORIZED)
                     .map(move |_| pwd)
             })
@@ -169,7 +169,7 @@ impl Server {
 
         // If this part of the path is a valid user, redirect.
         // Otherwise serve from the local filesystem.
-        cached::User::by_name(&first_seg)
+        cached::CachedUser::by_name(&first_seg)
             .then(move |res| {
                 match res {
                     Ok(_) => {

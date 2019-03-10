@@ -1,11 +1,12 @@
-
+//
+// Cached versions of Unix account lookup and Pam auth.
+//
 use std::time::Duration;
-use std::sync::Arc;
 use std::io;
+use std::sync::Arc;
 
 use futures::prelude::*;
 use futures::try_ready;
-use tokio_threadpool::blocking;
 
 use crate::cache;
 use crate::unixuser;
@@ -16,55 +17,45 @@ lazy_static! {
     static ref PAMCACHE: cache::Cache<String, ()> = cache::Cache::new().maxage(Duration::new(120, 0));
 }
 
-pub struct User {
+pub struct CachedUser {
     try_cache:  bool,
     user:       String,
+    userfut:    unixuser::UserFuture,
 }
 
-impl User {
-    pub fn by_name(user: &str) -> User {
-        User {
+impl CachedUser {
+    pub fn by_name(user: &str) -> CachedUser {
+        CachedUser {
             try_cache:  true,
             user:       user.to_string(),
+            userfut:    unixuser::User::by_name_fut(user),
         }
     }
 }
 
-impl Future for User {
+impl Future for CachedUser {
     type Item = Arc<unixuser::User>;
     type Error = io::Error;
 
     fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-
         if self.try_cache {
             if let Some(p) = PWCACHE.get(&self.user) {
                 return Ok(Async::Ready(p));
             }
             self.try_cache = false;
         }
-
-        let user = self.user.clone();
-        let bres = blocking(move || {
-            match unixuser::User::by_name(&user) {
-                Ok(r) => {
-                    let p = PWCACHE.insert(user, r);
-                    return Ok(p);
-                }
-                Err(e) => {
-                    Err(e)
-                }
-            }
-        });
-        match bres {
-            Ok(Async::Ready(Ok(pw))) => Ok(Async::Ready(pw)),
-            Ok(Async::Ready(Err(e))) => Err(e),
+        match self.userfut.poll() {
+            Ok(Async::Ready(pw)) => {
+                let p = PWCACHE.insert(self.user.clone(), pw);
+                Ok(Async::Ready(p))
+            },
             Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            Err(e) => Err(e),
         }
     }
 }
 
-pub struct PamAuth {
+pub struct CachedPamAuth {
     service:    String,
     user:       String,
     pass:       String,
@@ -74,9 +65,9 @@ pub struct PamAuth {
     fut:        Option<tokio_pam::PamAuthFuture>,
 }
 
-impl PamAuth {
-    pub fn auth(pam_auth: tokio_pam::PamAuth, service: &str, user: &str, pass: &str, remip: Option<&str>) -> PamAuth {
-        PamAuth {
+impl CachedPamAuth {
+    pub fn auth(pam_auth: tokio_pam::PamAuth, service: &str, user: &str, pass: &str, remip: Option<&str>) -> CachedPamAuth {
+        CachedPamAuth {
             service:    service.to_string(),
             user:       user.to_string(),
             pass:       pass.to_string(),
@@ -88,7 +79,7 @@ impl PamAuth {
     }
 }
 
-impl Future for PamAuth {
+impl Future for CachedPamAuth {
     type Item = ();
     type Error = tokio_pam::PamError;
 

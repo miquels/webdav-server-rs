@@ -1,11 +1,14 @@
-
-use libc;
-use libc::{getpwnam_r,getpwuid_r,c_char};
-
 use std;
+use std::io;
 use std::path::{Path,PathBuf};
 use std::ffi::{CStr,OsStr};
 use std::os::unix::ffi::OsStrExt;
+
+use futures::{Async, Future};
+use tokio_threadpool::blocking;
+
+use libc;
+use libc::{getpwnam_r,getpwuid_r,c_char};
 
 #[derive(Debug)]
 pub struct User {
@@ -48,14 +51,14 @@ unsafe fn to_passwd(pwd: &libc::passwd) -> User {
 }
 
 impl User {
-    pub fn by_name(name: &str) -> Result<User, std::io::Error> {
+    pub fn by_name(name: &str) -> Result<User, io::Error> {
         let mut buf = [0; 1024];
         let mut pwd: libc::passwd = unsafe {std::mem::zeroed()};
         let mut result: *mut libc::passwd = std::ptr::null_mut();
 
         let cname = match std::ffi::CString::new(name) {
             Ok(un) => un,
-            Err(_) => return Err(std::io::Error::from_raw_os_error(libc::ENOENT)),
+            Err(_) => return Err(io::Error::from_raw_os_error(libc::ENOENT)),
         };
         let ret = unsafe {
             getpwnam_r(cname.as_ptr(), &mut pwd as *mut _,
@@ -65,17 +68,17 @@ impl User {
         };
         if ret == 0 {
             if result.is_null() {
-                return Err(std::io::Error::from_raw_os_error(libc::ENOENT));
+                return Err(io::Error::from_raw_os_error(libc::ENOENT));
             }
             let p = unsafe { to_passwd(&pwd) };
             Ok(p)
         } else {
-            Err(std::io::Error::from_raw_os_error(ret))
+            Err(io::Error::from_raw_os_error(ret))
         }
     }
 
     #[allow(dead_code)]
-    pub fn by_uid(uid: u32) -> Result<User, std::io::Error> {
+    pub fn by_uid(uid: u32) -> Result<User, io::Error> {
         let mut buf = [0; 1024];
         let mut pwd: libc::passwd = unsafe {std::mem::zeroed()};
         let mut result: *mut libc::passwd = std::ptr::null_mut();
@@ -88,12 +91,37 @@ impl User {
         };
         if ret == 0 {
             if result.is_null() {
-                return Err(std::io::Error::from_raw_os_error(libc::ENOENT));
+                return Err(io::Error::from_raw_os_error(libc::ENOENT));
             }
             let p = unsafe { to_passwd(&pwd) };
             Ok(p)
         } else {
-            Err(std::io::Error::from_raw_os_error(ret))
+            Err(io::Error::from_raw_os_error(ret))
+        }
+    }
+
+    pub fn by_name_fut(user: &str) -> UserFuture {
+        UserFuture {
+            user:       user.to_string(),
+        }
+    }
+}
+
+pub struct UserFuture {
+    user:       String,
+}
+
+impl Future for UserFuture {
+    type Item = User;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+        let user = self.user.clone();
+        match blocking(move || User::by_name(&user)) {
+            Ok(Async::Ready(Ok(pw))) => Ok(Async::Ready(pw)),
+            Ok(Async::Ready(Err(e))) => Err(e),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
