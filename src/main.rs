@@ -1,24 +1,30 @@
-//
-//  Sample application.
-//
-//  Listens on localhost:4918, plain http, no ssl.
-//  Connect to http://localhost:4918/<DIR>/
-//
+//! # `webdav-server` is a webdav server that handles user-accounts.
+//!
+//! This is a webdav server that allows access to a users home directory,
+//! just like an ancient FTP server would (remember those?).
+//!
+//! Right now, this server does not implement TLS or logging. The general idea
+//! is that most people put a reverse-proxy in front of services like this
+//! anyway, like NGINX, that can do TLS and logging.
+//!
 #![feature(async_await, await_macro, futures_api)]
 
 #[macro_use] extern crate clap;
 #[macro_use] extern crate log;
 #[macro_use] extern crate lazy_static;
+#[macro_use] extern crate serde_derive;
 
-mod userfs;
-mod rootfs;
-mod unixuser;
 mod cache;
 mod cached;
-mod suid;
+mod config;
 mod either;
+mod rootfs;
+mod suid;
+mod unixuser;
+mod userfs;
 
 use std::net::SocketAddr;
+use std::process::exit;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -41,6 +47,8 @@ use crate::userfs::UserFs;
 use crate::rootfs::RootFs;
 use crate::suid::switch_ugid;
 use crate::either::*;
+
+static PROGNAME: &'static str = "webdav-server";
 
 #[derive(Clone)]
 struct Server {
@@ -199,7 +207,7 @@ impl Server {
         -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
     {
         debug!("Server::handle_root: /");
-        let fs = RootFs::new(pwd.name.clone(), &pwd.dir, pwd.uid, pwd.gid);
+        let fs = RootFs::new(&pwd.dir, pwd.name.clone(), Some((pwd.uid, pwd.gid)));
         let ls = FakeLs::new();
         let config = DavConfig {
             fs:         Some(fs),
@@ -250,11 +258,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let matches = clap_app!(webdav_server =>
         (version: "0.1")
+        (@arg CFG: -c --config +takes_value "configuration file (/etc/webdav-server.toml)")
         (@arg PORT: -p --port +takes_value "port to listen on (4918)")
         (@arg DIR: -d --dir +takes_value "local directory to serve")
     ).get_matches();
 
     let dir = matches.value_of("DIR").unwrap_or("/var/tmp");
+    let port = matches.value_of("PORT").unwrap_or("4918");
+    let cfg = matches.value_of("CFG").unwrap_or("/etc/webdav-server.toml");
+
+    let _config = match config::read(cfg) {
+        Err(e) => {
+            eprintln!("{}: {}: {}", PROGNAME, cfg, e);
+            exit(1);
+        },
+        Ok(c) => c,
+    };
 
     let (pam, pam_task) = PamAuth::lazy_new()?;
 
@@ -266,7 +285,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     };
 
-    let port = matches.value_of("PORT").unwrap_or("4918");
     let addr = "0.0.0.0:".to_string() + port;
     let addr = SocketAddr::from_str(&addr)?;
     let server = hyper::Server::try_bind(&addr)?

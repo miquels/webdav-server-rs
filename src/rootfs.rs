@@ -21,10 +21,12 @@ pub struct RootFs {
 }
 
 impl RootFs {
-    pub fn new<P: AsRef<Path> + Clone>(user: String, base: P, uid: u32, gid: u32) -> Box<RootFs> {
+    pub fn new<P>(dir: P, user: String, ugid: Option<(u32, u32)>) -> Box<RootFs>
+        where P: AsRef<Path> + Clone,
+    {
         Box::new(RootFs{
             user:   user,
-            fs:     *UserFs::new(base, Some((uid, gid)), false),
+            fs:     *UserFs::new(dir, ugid, false),
         })
     }
 }
