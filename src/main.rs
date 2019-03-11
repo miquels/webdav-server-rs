@@ -483,6 +483,7 @@ fn make_listener(addr: &SocketAddr) -> io::Result<std::net::TcpListener> {
     } else {
         net2::TcpBuilder::new_v4()?
     };
+    s.reuse_address(true)?;
     s.bind(addr)?;
     s.listen(128)
 }
