@@ -26,3 +26,6 @@ tokio-pam = { path = "pam" }
 tokio-threadpool = "0.1.12"
 url = "1.7.2"
 webdav-handler = { path = "../webdav-handler-rs", version = "0.1.0" }
+serde_derive = "1.0.89"
+serde = "1.0.89"
+toml = "0.4.10"
