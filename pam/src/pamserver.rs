@@ -29,7 +29,7 @@ pub(crate) struct PamServer {
 impl PamServer {
 
     // fork and start the server, return the stream socket for communication.
-    pub(crate) fn start() -> Result<StdUnixStream, io::Error> {
+    pub(crate) fn start(num_threads: Option<usize>) -> Result<StdUnixStream, io::Error> {
         // Create a unix socketpair for communication.
         let (sock1, sock2) = StdUnixStream::pair()?;
         let sock3 = sock2.try_clone()?;
@@ -49,7 +49,7 @@ impl PamServer {
             };
             pam_lower_rlimits();
             trace!("PamServer: child: starting server");
-            server.serve();
+            server.serve(num_threads.unwrap_or(8));
             std::process::exit(0);
         }
         drop(sock2);
@@ -60,10 +60,10 @@ impl PamServer {
     }
 
     // serve requests.
-    fn serve(&mut self) {
+    fn serve(&mut self, num_threads: usize) {
 
         // create a threadpool, then serve connections via the threadpool.
-        let pool = threadpool::ThreadPool::new(8);
+        let pool = threadpool::ThreadPool::new(num_threads);
 
         // process incoming connections.
         loop {

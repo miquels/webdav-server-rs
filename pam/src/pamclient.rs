@@ -13,7 +13,6 @@ use futures::try_ready;
 
 use tokio_uds::UnixStream;
 use tokio_io::{self, AsyncRead};
-use tokio_core;
 use tokio_reactor;
 
 use crate::pam::{ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER, PamError};
@@ -49,8 +48,8 @@ impl PamAuth {
     /// and receive responses from it.
     ///
     /// Note that you must call this from within the tokio runtime.
-    pub fn new() -> Result<PamAuth, io::Error> {
-        let (auth, task) = PamAuthTask::start()?;
+    pub fn new(num_threads: Option<usize>) -> Result<PamAuth, io::Error> {
+        let (auth, task) = PamAuthTask::start(num_threads)?;
         let task = task
             .map(|_| debug!("PamAuthTask is done."))
             .map_err(|_e| debug!("PamAuthTask future returned error: {}", _e));
@@ -64,8 +63,8 @@ impl PamAuth {
     /// This is useful if you need to instantiate a PamAuth while not in a runtime.
     ///
     /// You need to spawn the PamAuthTask on the runtime before using the PamAuth handle.
-    pub fn lazy_new() -> Result<(PamAuth, PamAuthTask), io::Error> {
-        PamAuthTask::start()
+    pub fn lazy_new(num_threads: Option<usize>) -> Result<(PamAuth, PamAuthTask), io::Error> {
+        PamAuthTask::start(num_threads)
     }
 
     /// Authenticate via pam and return the result.
@@ -170,10 +169,10 @@ pub struct PamAuthTask {
 impl PamAuthTask {
 
     // Start the server process. Then return a handle to send requests on.
-    fn start() -> Result<(PamAuth, PamAuthTask), io::Error> {
+    fn start(num_threads: Option<usize>) -> Result<(PamAuth, PamAuthTask), io::Error> {
 
         // spawn the server process.
-        let serversock = PamServer::start()?;
+        let serversock = PamServer::start(num_threads)?;
 
         // transform standard unixstream to tokio version.
         let handle = tokio_reactor::Handle::default();
