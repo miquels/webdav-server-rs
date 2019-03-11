@@ -3,7 +3,7 @@
 //
 use std::time::Duration;
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::prelude::*;
 use futures::try_ready;
@@ -12,9 +12,38 @@ use crate::cache;
 use crate::unixuser;
 use tokio_pam;
 
+struct Timeouts {
+    pwcache:    Duration,
+    pamcache:   Duration,
+}
+
 lazy_static! {
-    static ref PWCACHE: cache::Cache<String, unixuser::User> = cache::Cache::new().maxage(Duration::new(120, 0));
-    static ref PAMCACHE: cache::Cache<String, ()> = cache::Cache::new().maxage(Duration::new(120, 0));
+    static ref TIMEOUTS: Mutex<Timeouts> = Mutex::new(Timeouts{
+        pwcache:    Duration::new(120, 0),
+        pamcache:   Duration::new(120, 0),
+    });
+    static ref PWCACHE: cache::Cache<String, unixuser::User> = new_pwcache();
+    static ref PAMCACHE: cache::Cache<String, ()> = new_pamcache();
+}
+
+fn new_pwcache() -> cache::Cache<String, unixuser::User> {
+    let timeouts = TIMEOUTS.lock().unwrap();
+    cache::Cache::new().maxage(timeouts.pwcache)
+}
+
+fn new_pamcache() -> cache::Cache<String, ()> {
+    let timeouts = TIMEOUTS.lock().unwrap();
+    cache::Cache::new().maxage(timeouts.pamcache)
+}
+
+pub(crate) fn set_pwcache_timeout(secs: usize) {
+    let mut timeouts = TIMEOUTS.lock().unwrap();
+    timeouts.pwcache = Duration::new(secs as u64, 0);
+}
+
+pub(crate) fn set_pamcache_timeout(secs: usize) {
+    let mut timeouts = TIMEOUTS.lock().unwrap();
+    timeouts.pamcache = Duration::new(secs as u64, 0);
 }
 
 pub struct CachedUser {

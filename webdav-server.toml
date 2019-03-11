@@ -1,32 +1,35 @@
 #
-# server settings.
+# Webdav server settings.
 #
 [server]
   # HTTP Port(s) to listen on.
   # (https not implemented yet - use a frontend proxy like nginx)
   listen = [ "0.0.0.0:4918", "[::]:4918" ]
   # Unix uid/gid to run under (when not running setuid as user).
+  # Optional - if not set, will not change uid.
   uid = 33
   gid = 33
 
 #
-# user settings.
+# User settings.
 #
 [accounts]
   # which accounts are defined.
   acct-type = "unix"
   # how to authenticate.
   auth-type = "pam"
-  # do we run setuid if authenticated.
+  # do we run setuid if authenticated (default: false).
   setuid = true
+  # realm to use with basic authentication (default: "Webdav Server").
+  realm = "Webdav Server"
 
 #
-# webdav protocol settings.
+# Webdav protocol settings.
 #
 [webdav]
-  # locking can be "none" (default) or "fake". Fake locking is only
-  # advertized to Windows and OSX clients.
-  locking = "fake"
+  # locksystem can be "fakels" (default) or "none". Fake locking is only
+  # advertized to Windows and OSX clients (based on User-Agent header).
+  locksystem = "fakels"
 
 #
 # PAM authentication settings.
@@ -34,20 +37,18 @@
 [pam]
   # PAM service to use.
   service = "webdav"
-  # Maximum time to cache between requests (secs).
-  cache-timeout-between = 120
-  # Absolute maximum cache time (secs)
-  cache-timeout-absolute = 600
-  # Number of thread to use for the PAM service threadpool.
+  # Cache timeout (secs). 0 disables the cache (default: 120).
+  cache-timeout = 120
+  # Number of thread to use for the PAM service threadpool (default: 8).
   threads = 8
 
 #
 # Unix account settings.
 #
 [unix]
-  # Cache timeout (secs). 0 disables the cache.
-  cache-timeout = 60
-  # UIDs under this value cannot login.
+  # Cache timeout (secs). 0 disables the cache (default: 120).
+  cache-timeout = 120
+  # UIDs under this value cannot login (default: 0).
   min-uid = 1000
 
 #
@@ -56,24 +57,22 @@
 # This serves an index.html to GET/HEAD "/" requests from browsers.
 # It also serves any other files present in the directory.
 #
-# If "auth" is set, clients must login to see the content.
+# If "auth" is set, browser clients must login to see the content.
 #
 # If "webdav"  is set, then:
-# - all methods other than GET will force authentication
-# - OPTIONS / will return a reasonable result
-# - PROPFIND / will return one entry, for "/username/" (the clients username)
+# - all methods other than GET/HEAD will force authentication
+# - OPTIONS "/" will return a reasonable result
+# - PROPFIND "/" will return one entry, for "/username/" (the clients username)
 # - all other methods will return a 405 status code.
 #
 [rootfs]
-  # Path. Usually "/", but it doesn't have to be.
-  path = "/"
   # Directory to serve.
   directory = "/var/www/html"
-  # Index file.
+  # Index file (default: "index.html").
   index = "index.html"
-  # Force authentication even for simple GET/HEAD requests
-  auth = true
-  # Enable PROPFIND and OPTIONS for webdav clients (authenticated)
+  # Force authentication even for simple GET/HEAD requests (default: false).
+  auth = false
+  # Enable PROPFIND and OPTIONS for webdav clients (authenticated) (default: true).
   webdav = true
 
 #
@@ -89,6 +88,4 @@
   # Path. If this contains ":username", then that part of the path
   # must match the username. Most common setting here is "/:username".
   path = "/:username"
-  # Do we serve GET requests on directories as a HTML index (default true)
-  dirindex = true
 

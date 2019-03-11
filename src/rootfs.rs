@@ -37,7 +37,7 @@ impl DavFileSystem for RootFs {
     fn metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<DavMetaData>> {
         async move {
             let b = path.as_bytes();
-            if b != b"/" && b != self.user.as_bytes() {
+            if b != b"/" && &b[1..] != self.user.as_bytes() {
                 return Err(FsError::NotFound);
             }
             let path = WebPath::from_str("/", "").unwrap();
@@ -49,10 +49,12 @@ impl DavFileSystem for RootFs {
     fn read_dir<'a>(&'a self, path: &'a WebPath, _meta: ReadDirMeta) -> FsFuture<Pin<Box<Stream<Item=Box<DavDirEntry>> + Send>>> {
         Box::pin(async move {
             let mut v = Vec::new();
-            v.push(RootFsDirEntry{
-                name:   self.user.clone(),
-                meta:   await!(self.fs.metadata(path)),
-            });
+            if self.user != "" {
+                v.push(RootFsDirEntry{
+                    name:   self.user.clone(),
+                    meta:   await!(self.fs.metadata(path)),
+                });
+            }
             let strm = futures03::stream::iter(RootFsReadDir{ iterator: v.into_iter() });
             Ok(Box::pin(strm) as Pin<Box<Stream<Item=Box<DavDirEntry>> + Send>>)
         })

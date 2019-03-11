@@ -1,5 +1,6 @@
 use std::{fs, io};
 use std::path::Path;
+use std::process::exit;
 use std::net::{SocketAddr, ToSocketAddrs};
 
 use serde::{Deserialize, Deserializer};
@@ -7,13 +8,16 @@ use toml;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
-    server:     Server,
-    accounts:   Option<Accounts>,
-    webdav:     Option<Webdav>,
-    pam:        Option<Pam>,
-    unix:       Option<Unix>,
-    rootfs:     Option<RootFs>,
-    users:      Option<Users>
+    pub server:     Server,
+    pub accounts:   Accounts,
+    #[serde(default)]
+    pub webdav:     Webdav,
+    #[serde(default)]
+    pub pam:        Pam,
+    #[serde(default)]
+    pub unix:       Unix,
+    pub rootfs:     Option<RootFs>,
+    pub users:      Option<Users>
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -28,52 +32,50 @@ pub struct Server {
 #[derive(Deserialize, Debug, Clone)]
 pub struct Accounts {
     #[serde(rename = "acct-type")]
-    acct_type:      String,
+    pub acct_type:      String,
     #[serde(rename = "auth-type")]
-    auth_type:      String,
+    pub auth_type:      String,
     #[serde(default)]
-    setuid:         bool,
+    pub setuid:         bool,
+    #[serde(default)]
+    pub realm:          Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct Webdav {
-    pub locking:    String,
+    #[serde(default)]
+    pub locksystem:     String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct Pam {
-    pub service:                String,
-    #[serde(rename = "cache-timeout-between")]
-    pub cache_timeout_between:  Option<usize>,
-    #[serde(rename = "cache-timeout-absolute")]
-    pub cache_timeout_absolute: Option<usize>,
-    pub threads:                Option<usize>,
+    pub service:        String,
+    #[serde(rename = "cache-timeout")]
+    pub cache_timeout:  Option<usize>,
+    pub threads:        Option<usize>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct Unix {
     #[serde(rename = "cache-timeout")]
     pub cache_timeout:  Option<usize>,
     #[serde(rename = "min-uid", default)]
-    pub min_uid:        u32,
+    pub min_uid:        Option<u32>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct RootFs {
-    pub path:       String,
     pub directory:  String,
     pub index:      Option<String>,
     #[serde(default)]
     pub auth:       bool,
     #[serde(default)]
-    pub webdav:     bool,
+    pub webdav:     Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Users {
     pub path:       String,
-    #[serde(default)]
-    pub dirindex:   bool,
 }
 
 #[derive(Deserialize,Debug,Clone)]
@@ -123,5 +125,35 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
     }?;
 
     Ok(config)
+}
+
+pub fn check(cfg: &str, config: &Config) {
+    if config.accounts.acct_type != "unix" {
+        eprintln!("{}: [accounts]: unknown acct-type: {}", cfg, config.accounts.acct_type);
+        exit(1);
+    }
+    if config.accounts.auth_type != "pam" {
+        eprintln!("{}: [accounts]: unknown auth-type: {}", cfg, config.accounts.auth_type);
+        exit(1);
+    }
+    if config.pam.service == "" {
+        eprintln!("{}: missing section [pam]", cfg);
+        exit(1);
+    }
+    match config.webdav.locksystem.as_str() {
+        ""|"none"|"fakels" => {},
+        _ => {
+            eprintln!("{}: [webdav]: unknown locksystem: {}", cfg, config.webdav.locksystem);
+            exit(1);
+        }
+    }
+    if config.rootfs.is_none() && config.users.is_none() {
+        eprintln!("{}: must have at least one of [rootfs] or [users]", cfg);
+        exit(1);
+    }
+    if config.accounts.setuid && (config.server.uid.is_none() || config.server.gid.is_none()) {
+        eprintln!("{}: [server]: missing uid and/or gid", cfg);
+        exit(1);
+    }
 }
 
