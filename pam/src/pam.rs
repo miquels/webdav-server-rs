@@ -1,7 +1,8 @@
-
 use std::ffi::{CStr,CString};
 use std::os::raw::{c_char,c_int,c_void};
 use std::error::Error;
+
+use once_cell::sync::OnceCell;
 
 extern {
     fn c_pam_auth(service: *const c_char, user: *const c_char, pass: *const c_char, remip: *const c_char) -> c_int;
@@ -13,6 +14,8 @@ extern {
 pub(crate) const ERR_NUL_BYTE : i32 = 414243;
 pub(crate) const ERR_SEND_TO_SERVER : i32 = 414244;
 pub(crate) const ERR_RECV_FROM_SERVER : i32 = 414245;
+
+pub(crate) static TEST_MODE: OnceCell<()> = OnceCell::INIT;
 
 /// Error returned oif authentication fails.
 ///
@@ -70,7 +73,7 @@ impl From<std::ffi::NulError> for PamError {
 
 pub(crate) fn pam_auth(service: &str, user: &str, pass: &str, remip: &str) -> Result<(), PamError> {
 
-    if service == "xyzzy-test-test" && remip == "xyzzy-test-test" {
+    if TEST_MODE.get().is_some() {
         return if user == "test" {
             Ok(())
         } else {

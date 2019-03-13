@@ -38,7 +38,7 @@ use http::status::StatusCode;
 use net2;
 use tokio;
 
-use tokio_pam::PamAuth;
+use pam_sandboxed::PamAuth;
 use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};
 use webdav_handler::{DavConfig, DavHandler, webpath::WebPath};
 use webdav_handler::{ls::DavLockSystem, localfs::LocalFs, fakels::FakeLs};

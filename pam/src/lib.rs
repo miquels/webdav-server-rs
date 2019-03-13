@@ -26,3 +26,12 @@ mod stream_channel;
 pub use crate::pam::PamError;
 pub use crate::pamclient::{PamAuth, PamAuthFuture};
 
+// See bin/main.rs, mod tests.
+use std::sync::Once;
+static TEST_INIT: Once = Once::new();
+#[doc(hidden)]
+pub fn test_mode() {
+    use crate::pam::TEST_MODE;
+    TEST_INIT.call_once(|| TEST_MODE.set(()).unwrap());
+}
+

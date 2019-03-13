@@ -11,7 +11,7 @@ use futures03::compat::Future01CompatExt;
 
 use crate::cache;
 use crate::unixuser::{self, User};
-use tokio_pam;
+use pam_sandboxed::{PamAuth, PamError};
 
 struct Timeouts {
     pwcache:    Duration,
@@ -47,8 +47,8 @@ pub(crate) fn set_pamcache_timeout(secs: usize) {
     timeouts.pamcache = Duration::new(secs as u64, 0);
 }
 
-pub async fn pam_auth<'a>(pam_auth: tokio_pam::PamAuth, service: &'a str, user: &'a str, pass: &'a str, remip: Option<&'a str>)
-    -> Result<(), tokio_pam::PamError>
+pub async fn pam_auth<'a>(pam_auth: PamAuth, service: &'a str, user: &'a str, pass: &'a str, remip: Option<&'a str>)
+    -> Result<(), PamError>
 {
     let mut s = DefaultHasher::new();
     service.hash(&mut s);

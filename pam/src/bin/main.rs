@@ -8,13 +8,13 @@ use futures::prelude::*;
 use futures::future;
 use tokio;
 
-use tokio_pam;
+use pam_sandboxed;
 
 error_chain! {
     foreign_links {
         NulError(::std::ffi::NulError);
         Io(::std::io::Error);
-        Pam(tokio_pam::PamError);
+        Pam(pam_sandboxed::PamError);
     }
 }
 
@@ -33,7 +33,7 @@ fn run() -> Result<()> {
 
     let fut = future::ok::<(), ()>(())
         .then(|_| {
-            match tokio_pam::PamAuth::new() {
+            match pam_sandboxed::PamAuth::new(None) {
                 Ok(p) => Ok(p),
                 Err(_e) => {
                     eprintln!("PamAuth::new() returned error: {}", _e);
@@ -59,13 +59,12 @@ fn run() -> Result<()> {
 quick_main!(run);
 
 // I've put the tests here in bin/main.rs instead of in lib.rs, because "cargo test"
-// for the library links the tests without -lpam, so it fails. It sucks, because
-// now the test for the magic service "xyzzy-test-test" is always present in src/pam.rs,
-// instead of only during tests.
+// for the library links the tests without -lpam, so it fails. The price we pay
+// for that is a dynamic test-mode setting in the library, instead of compile-time.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio_pam::{PamAuth, PamError};
+    use pam_sandboxed::{PamAuth, PamError, test_mode};
     use futures::future::lazy;
     use tokio;
 
@@ -73,8 +72,9 @@ mod tests {
 
     #[test]
     fn test_auth() {
+        test_mode();
         let fut = lazy(move || {
-                let mut pam = PamAuth::new().unwrap();
+                let mut pam = PamAuth::new(None).unwrap();
                 let mut pam2 = pam.clone();
                 pam.auth(TEST_STR, "test", "foo", Some(TEST_STR))
                     .map_err(|e| {
@@ -101,8 +101,9 @@ mod tests {
 
     #[test]
     fn test_many() {
+        test_mode();
         let fut = lazy(move || {
-            let mut pam = PamAuth::new().unwrap();
+            let mut pam = PamAuth::new(None).unwrap();
             for i in 1..=1000 {
                 tokio::spawn(
                     pam.auth(TEST_STR, "test", "bar", Some(TEST_STR))
