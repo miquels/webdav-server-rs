@@ -4,8 +4,10 @@ use std::path::{Path,PathBuf};
 use std::ffi::{CStr,OsStr};
 use std::os::unix::ffi::OsStrExt;
 
-use futures::{Async, Future};
-use tokio_threadpool::blocking;
+use futures03::compat::Future01CompatExt;
+use futures03::FutureExt;
+
+use tokio_threadpool;
 
 use libc;
 use libc::{getpwnam_r,getpwuid_r,c_char};
@@ -100,29 +102,17 @@ impl User {
         }
     }
 
-    pub fn by_name_fut(user: &str) -> UserFuture {
-        UserFuture {
-            user:       user.to_string(),
-        }
+    pub async fn by_name_async(name: &str) -> Result<User, io::Error> {
+        let fut = futures::future::poll_fn(move || {
+            tokio_threadpool::blocking(move ||  User::by_name(name))
+        })
+        .compat()
+        .then(|res| match res {
+                Ok(x) => futures03::future::ready(x),
+                Err(_) => panic!("the thread pool has shut down"),
+            });
+        await!(fut)
     }
-}
 
-pub struct UserFuture {
-    user:       String,
-}
-
-impl Future for UserFuture {
-    type Item = User;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-        let user = self.user.clone();
-        match blocking(move || User::by_name(&user)) {
-            Ok(Async::Ready(Ok(pw))) => Ok(Async::Ready(pw)),
-            Ok(Async::Ready(Err(e))) => Err(e),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-        }
-    }
 }
 

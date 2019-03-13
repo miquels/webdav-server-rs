@@ -17,7 +17,6 @@
 mod cache;
 mod cached;
 mod config;
-mod either;
 mod rootfs;
 mod suid;
 mod unixuser;
@@ -25,17 +24,18 @@ mod userfs;
 
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
-use net2;
 use std::process::exit;
 use std::sync::Arc;
 
-use futures::prelude::*;
-use futures::{self, future, future::Either};
 use bytes::Bytes;
+use env_logger;
+use futures::{future, Future, Stream};
+use futures03::{FutureExt, TryFutureExt};
+use futures03::compat::Future01CompatExt;
 use hyper;
 use http;
 use http::status::StatusCode;
-use env_logger;
+use net2;
 use tokio;
 
 use tokio_pam::PamAuth;
@@ -46,9 +46,10 @@ use webdav_handler::{ls::DavLockSystem, localfs::LocalFs, fakels::FakeLs};
 use crate::userfs::UserFs;
 use crate::rootfs::RootFs;
 use crate::suid::switch_ugid;
-use crate::either::*;
 
 static PROGNAME: &'static str = "webdav-server";
+
+pub type BoxedByteStream = Box<futures::Stream<Item = Bytes, Error = io::Error> + Send + 'static>;
 
 // Contains "state" and a handle to the config.
 #[derive(Clone)]
@@ -59,7 +60,8 @@ struct Server {
     config:         Arc<config::Config>,
 }
 
-type BoxedResponse = Box<Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error> + Send>;
+#[allow(dead_code)]
+type HyperResult = Result<hyper::Response<hyper::Body>, io::Error>;
 
 // Server implementation.
 impl Server {
@@ -144,13 +146,45 @@ impl Server {
         }
     }
 
-    // handle a request.
-    fn handle(&self, req: hyper::Request<hyper::Body>) -> BoxedResponse {
+    // futures 0.1 adapter.
+    fn handle(&self, req: hyper::Request<hyper::Body>)
+        -> impl Future<Item=hyper::Response<hyper::Body>, Error=io::Error> + Send + 'static
+    {
+        // NOTE: we move the body out of the request, and pass it seperatly.
+        //
+        // That is needed since parts from the request can be borrowed,
+        // e.g. when you pass req.uri() to  a function. The async/await/futures stuff in
+        // the compiler then needs the Request to be Sync, and the body isn't.
+        //
+        //         error[E0277]: `ReqBody` cannot be shared between threads safely
+        //   --> src/main.rs:26:12
+        //    |
+        // 26 |         -> impl Future<Item=http::Response<()>, Error=std::io::Error> + Send + 'a
+        //    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        //    |            `ReqBody` cannot be shared between threads safely
+        //    |
+        //    = help: within `http::request::Request<ReqBody>`, the trait `std::marker::Sync` is
+        //      not implemented for `ReqBody`
+        //    = help: consider adding a `where ReqBody: std::marker::Sync` bound
+        //    = note: required because it appears within the type `http::request::Request<ReqBody>`
+        //    = note: required because of the requirements on the impl of `std::marker::Send`
+        //      for `&http::request::Request<ReqBody>`
+        //
+        let (parts, body) = req.into_parts();
+        let req = http::Request::from_parts(parts, ());
+        let self2 = self.clone();
+        async move {
+            await!(self2.handle_async(req, body))
+        }.boxed().compat()
+    }
 
+    // handle a request.
+    async fn handle_async(&self, req: http::Request<()>, body: hyper::Body) -> HyperResult
+    {
         // interpret the path.
         let (path, first_seg, is_root) = match self.check_path(req.uri()) {
             Ok(x) => x,
-            Err(status) => return Box::new(self.error(status)),
+            Err(status) => return await!(self.error(status)),
         };
 
         // If we ask for "/" or "/file" with GET or HEAD, serve from local fs.
@@ -160,7 +194,7 @@ impl Server {
             // if rootfs.auth is set, wait until after authentication.
             if let Some(ref rootfs) = self.config.rootfs {
                 if rootfs.auth == false {
-                    return Box::new(self.handle_realroot(req, first_seg));
+                    return await!(self.handle_realroot(req, body, first_seg));
                 }
             }
             is_realroot = true;
@@ -173,67 +207,52 @@ impl Server {
                                 password: Some(password)
                             }
             )) => (username, password),
-            _ => return Box::new(self.error(StatusCode::UNAUTHORIZED)),
+            _ => return await!(self.error(StatusCode::UNAUTHORIZED)),
         };
 
-        let pam_auth = self.pam_auth.clone();
-        let self2 = self.clone();
-        let self3 = self.clone();
-
         // start by checking if user exists.
-        let fut = cached::CachedUser::by_name(&user)
-            .map_err(|_| StatusCode::UNAUTHORIZED)
-            .and_then(move |pwd| {
-                // authenticate user.
-                let service = self3.config.pam.service.as_str();
-                cached::CachedPamAuth::auth(pam_auth, service, &pwd.name, &pass, None)
-                    .map_err(|_| StatusCode::UNAUTHORIZED)
-                    .map(move |_| pwd)
-            })
-            .then(move |res| {
+        let pwd = match await!(cached::unixuser(&user)) {
+            Ok(pwd) => pwd,
+            Err(_) => return await!(self.error(StatusCode::UNAUTHORIZED)),
+        };
 
-                // handle errors.
-                let pwd = match res {
-                    Err(e) => return Either4::A(self2.error(e)),
-                    Ok(res) => res,
-                };
+        let service = self.config.pam.service.as_str();
+        let pam_auth = self.pam_auth.clone();
+        if let Err(_) = await!(cached::pam_auth(pam_auth, service, &pwd.name, &pass, None)) {
+            return await!(self.error(StatusCode::UNAUTHORIZED));
+        }
 
-                // check minimum uid
-                if let Some(min_uid) = self2.config.unix.min_uid {
-                    if pwd.uid < min_uid {
-                        debug!("Server::handle: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
-                        return Either4::A(self2.error(StatusCode::UNAUTHORIZED));
-                    }
-                }
+        // check minimum uid
+        if let Some(min_uid) = self.config.unix.min_uid {
+            if pwd.uid < min_uid {
+                debug!("Server::handle: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
+                return await!(self.error(StatusCode::UNAUTHORIZED));
+            }
+        }
 
-                // rootfs GET/HEAD delayed until after auth.
-                if is_realroot {
-                    return Either4::B(self2.handle_realroot(req, first_seg));
-                }
+        // rootfs GET/HEAD delayed until after auth.
+        if is_realroot {
+            return await!(self.handle_realroot(req, body, first_seg));
+        }
 
-                // could be virtual root for PROPFIND/OPTIONS.
-                if is_root {
-                    return Either4::C(self2.handle_virtualroot(req, pwd));
-                }
+        // could be virtual root for PROPFIND/OPTIONS.
+        if is_root {
+            return await!(self.handle_virtualroot(req, body, pwd));
+        }
 
-                // Check if username matches basedir.
-                let prefix = self2.user_path(&user);
-                if !path.starts_with(&prefix) {
-                    // in /<something>/ but doesn't match /:user/
-                    debug!("Server::handle: user {} prefix {} path {} -> 401", user, prefix, path);
-                    return Either4::A(self2.error(StatusCode::UNAUTHORIZED));
-                }
+        // Check if username matches basedir.
+        let prefix = self.user_path(&user);
+        if !path.starts_with(&prefix) {
+            // in /<something>/ but doesn't match /:user/
+            debug!("Server::handle: user {} prefix {} path {} -> 401", user, prefix, path);
+            return await!(self.error(StatusCode::UNAUTHORIZED));
+        }
 
-                // All set.
-                Either4::D(self2.handle_user(req, prefix, pwd))
-            });
-        Box::new(fut)
-
+        // All set.
+        await!(self.handle_user(req, body, prefix, pwd))
     }
 
-    fn error(&self, code: StatusCode)
-        -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
-    {
+    async fn error(&self, code: StatusCode) -> HyperResult {
         let msg = format!("<error>{} {}</error>\n",
                           code.as_u16(), code.canonical_reason().unwrap_or(""));
         let mut response = hyper::Response::builder();
@@ -243,131 +262,129 @@ impl Server {
             let realm = self.config.accounts.realm.as_ref().map(|s| s.as_str()).unwrap_or("Webdav Server");
             response.header("WWW-Authenticate", format!("Basic realm=\"{}\"", realm).as_str());
         }
-        let resp = response.body(msg.into()).unwrap();
-        futures::future::ok(resp)
+        Ok(response.body(msg.into()).unwrap())
     }
 
-    fn redirect(&self, path: String)
-        -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
-    {
+    async fn redirect(&self, path: String) -> HyperResult {
         let resp = hyper::Response::builder()
             .status(302)
             .header("content-type", "text/plain")
             .header("location", path)
             .body("302 Moved\n".into()).unwrap();
-        futures::future::ok(resp)
+        Ok(resp)
     }
 
     // serve from the local filesystem.
-    fn handle_realroot(&self, req: hyper::Request<hyper::Body>, first_seg: String)
-        -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
+    async fn handle_realroot(&self, req: http::Request<()>, body: hyper::Body, first_seg: String) -> HyperResult
     {
-        let self2 = self.clone();
-        let mut req = req;
-
         // If this part of the path is a valid user, redirect.
         // Otherwise serve from the local filesystem.
-        cached::CachedUser::by_name(&first_seg)
-            .then(move |res| {
-                if res.is_ok() {
-                    // first path segment is a valid username.
-                    debug!("Server::handle_realroot: redirect to /{}/", first_seg);
-                    return Either3::A(self2.redirect("/".to_string() + &first_seg + "/"));
-                }
+        if let Ok(_) = await!(cached::unixuser(&first_seg)) {
+            // first path segment is a valid username.
+            debug!("Server::handle_realroot: redirect to /{}/", first_seg);
+            return await!(self.redirect("/".to_string() + &first_seg + "/"));
+        }
 
-                match self2.config.rootfs {
-                    Some(ref rootfs) => {
-                        debug!("Server::handle_realroot: serving {:?}", req.uri());
-                        if first_seg == "" {
-                            let index = rootfs.index.as_ref().map(|s| s.as_str()).unwrap_or("index.html");
-                            let index = "/".to_string() + index;
-                            if let Ok(pq) = http::uri::PathAndQuery::from_shared(index.into()) {
-                                let mut parts = req.uri().clone().into_parts();
-                                parts.path_and_query = Some(pq);
-                                *req.uri_mut() = http::uri::Uri::from_parts(parts).unwrap();
-                            }
-                        }
-                        let fs = LocalFs::new(&rootfs.directory, true);
-                        let config = DavConfig {
-                            fs:         Some(fs),
-                            ..DavConfig::default()
-                        };
-                        Either3::B(self2.run_davhandler(req, config))
-                    },
-                    None => Either3::C(self2.error(StatusCode::NOT_FOUND))
-                }
-            })
+        // is a rootfs configured?
+        let rootfs = match self.config.rootfs {
+            Some(ref rootfs) => rootfs,
+            None => return await!(self.error(StatusCode::NOT_FOUND)),
+        };
+
+        debug!("Server::handle_realroot: serving {:?}", req.uri());
+
+        // index.html?
+        let mut req = req;
+        if first_seg == "" {
+            let index = rootfs.index.as_ref().map(|s| s.as_str()).unwrap_or("index.html");
+            let index = "/".to_string() + index;
+            if let Ok(pq) = http::uri::PathAndQuery::from_shared(index.into()) {
+                let mut parts = req.uri().clone().into_parts();
+                parts.path_and_query = Some(pq);
+                *req.uri_mut() = http::uri::Uri::from_parts(parts).unwrap();
+            }
+        }
+
+        let fs = LocalFs::new(&rootfs.directory, true);
+        let config = DavConfig {
+            fs:         Some(fs),
+            ..DavConfig::default()
+        };
+        await!(self.run_davhandler(req, body, config))
     }
 
     // virtual root filesytem for PROPFIND/OPTIONS in "/".
-    fn handle_virtualroot(&self, req: hyper::Request<hyper::Body>, pwd: Arc<unixuser::User>)
-        -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
+    async fn handle_virtualroot(&self, req: http::Request<()>, body: hyper::Body, pwd: Arc<unixuser::User>)
+        -> HyperResult
     {
-        match self.config.rootfs {
-            Some(ref _rootfs) => {
-                debug!("Server::handle_virtualroot: /");
-                let ugid = match self.config.accounts.setuid {
-                    true => Some((pwd.uid, pwd.gid)),
-                    false => None,
-                };
-                // Only pass in the user if the base of the users tree
-                // is the same as the base root directory (right now always "/").
-                let user = if self.users_path.as_str() == "/" {
-                    pwd.name.clone()
-                } else {
-                    "".to_string()
-                };
-                let fs = RootFs::new(&pwd.dir, user, ugid);
-                let config = DavConfig {
-                    fs:         Some(fs),
-                    ls:         self.locksystem(),
-                    principal:  Some(pwd.name.to_string()),
-                    ..DavConfig::default()
-                };
-                Either::A(self.run_davhandler(req, config))
-            },
-            None => Either::B(self.error(StatusCode::NOT_FOUND))
-        }
+        // is a rootfs configured?
+        let _rootfs = match self.config.rootfs {
+            Some(ref rootfs) => rootfs,
+            None => return await!(self.error(StatusCode::NOT_FOUND)),
+        };
+
+        debug!("Server::handle_virtualroot: /");
+        let ugid = match self.config.accounts.setuid {
+            true => Some((pwd.uid, pwd.gid)),
+            false => None,
+        };
+
+        // Only pass in the user if the base of the users tree
+        // is the same as the base root directory (right now always "/").
+        let user = if self.users_path.as_str() == "/" {
+            pwd.name.clone()
+        } else {
+            "".to_string()
+        };
+
+        let fs = RootFs::new(&pwd.dir, user, ugid);
+        let config = DavConfig {
+            fs:         Some(fs),
+            ls:         self.locksystem(),
+            principal:  Some(pwd.name.to_string()),
+            ..DavConfig::default()
+        };
+        await!(self.run_davhandler(req, body, config))
     }
 
-    fn handle_user(&self, req: hyper::Request<hyper::Body>, prefix: String, pwd: Arc<unixuser::User>)
-        -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
+    async fn handle_user(&self, req: http::Request<()>, body: hyper::Body, prefix: String, pwd: Arc<unixuser::User>)
+        -> HyperResult
     {
-        match self.config.users {
-            Some(ref _users) => {
-                let ugid = match self.config.accounts.setuid {
-                    true => Some((pwd.uid, pwd.gid)),
-                    false => None,
-                };
-                let fs = UserFs::new(&pwd.dir, ugid, true);
-                debug!("Server::handle_user: in userdir {} prefix {} ", pwd.name, prefix);
-                let config = DavConfig {
-                    prefix:     Some(prefix),
-                    fs:         Some(fs),
-                    ls:         self.locksystem(),
-                    principal:  Some(pwd.name.to_string()),
-                    ..DavConfig::default()
-                };
-                Either::A(self.run_davhandler(req, config))
-            },
-            None => Either::B(self.error(StatusCode::NOT_FOUND))
-        }
+        // do we have a users section?
+        let _users = match self.config.users {
+            Some(ref users) => users,
+            None => return await!(self.error(StatusCode::NOT_FOUND)),
+        };
+
+        let ugid = match self.config.accounts.setuid {
+            true => Some((pwd.uid, pwd.gid)),
+            false => None,
+        };
+        let fs = UserFs::new(&pwd.dir, ugid, true);
+
+        debug!("Server::handle_user: in userdir {} prefix {} ", pwd.name, prefix);
+        let config = DavConfig {
+            prefix:     Some(prefix),
+            fs:         Some(fs),
+            ls:         self.locksystem(),
+            principal:  Some(pwd.name.to_string()),
+            ..DavConfig::default()
+        };
+        await!(self.run_davhandler(req, body, config))
     }
 
-    fn run_davhandler(&self, req: hyper::Request<hyper::Body>, config: DavConfig)
-        -> impl Future<Item=hyper::Response<hyper::Body>, Error=std::io::Error>
+    async fn run_davhandler(&self, req: http::Request<()>, body: hyper::Body, config: DavConfig)
+        -> HyperResult
     {
-        // transform hyper::Request into http::Request, run handler,
-        // then transform http::Response into hyper::Response.
-        let (parts, body) = req.into_parts();
-        let body = body.map(|item| Bytes::from(item));
-        let req = http::Request::from_parts(parts, body);
-        self.dh.handle_with(config, req)
-            .and_then(|resp| {
-                let (parts, body) = resp.into_parts();
-                let body = hyper::Body::wrap_stream(body);
-                Ok(hyper::Response::from_parts(parts, body))
-            })
+        // move body back into request.
+        let (parts, _) = req.into_parts();
+        let req = http::Request::from_parts(parts, body.map(|item| Bytes::from(item)));
+
+        // run handler, then transform http::Response into hyper::Response.
+        let resp = await!(self.dh.handle_with(config, req).compat())?;
+        let (parts, body) = resp.into_parts();
+        let body = hyper::Body::wrap_stream(body);
+        Ok(hyper::Response::from_parts(parts, body))
     }
 }
 
