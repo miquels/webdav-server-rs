@@ -23,7 +23,7 @@ mod unixuser;
 mod userfs;
 
 use std::io;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::process::exit;
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ use env_logger;
 use futures::{future, Future, Stream};
 use futures03::{FutureExt, TryFutureExt};
 use futures03::compat::Future01CompatExt;
-use hyper;
+use hyper::{self, service::make_service_fn, server::conn::AddrStream};
 use http;
 use http::status::StatusCode;
 use net2;
@@ -139,7 +139,7 @@ impl Server {
     }
 
     // futures 0.1 adapter.
-    fn handle(&self, req: hyper::Request<hyper::Body>)
+    fn handle(&self, req: hyper::Request<hyper::Body>, remote_ip: SocketAddr)
         -> impl Future<Item=hyper::Response<hyper::Body>, Error=io::Error> + Send + 'static
     {
         // NOTE: we move the body out of the request, and pass it seperatly.
@@ -166,12 +166,12 @@ impl Server {
         let req = http::Request::from_parts(parts, ());
         let self2 = self.clone();
         async move {
-            await!(self2.handle_async(req, body))
+            await!(self2.handle_async(req, body, remote_ip))
         }.boxed().compat()
     }
 
     // authenticate user.
-    async fn auth<'a>(&'a self, req: &'a http::Request<()>) -> Result<Arc<unixuser::User>, StatusCode>
+    async fn auth<'a>(&'a self, req: &'a http::Request<()>, remote_ip: Option<&'a str>) -> Result<Arc<unixuser::User>, StatusCode>
     {
         // we must have a login/pass
         let (user, pass) = match req.headers().typed_get::<Authorization<Basic>>() {
@@ -192,7 +192,7 @@ impl Server {
         // authenticate.
         let service = self.config.pam.service.as_str();
         let pam_auth = self.pam_auth.clone();
-        if let Err(_) = await!(cached::pam_auth(pam_auth, service, &pwd.name, &pass, None)) {
+        if let Err(_) = await!(cached::pam_auth(pam_auth, service, &pwd.name, &pass, remote_ip)) {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
@@ -207,15 +207,29 @@ impl Server {
     }
 
     // handle a request.
-    async fn handle_async(&self, req: http::Request<()>, body: hyper::Body) -> HyperResult
+    async fn handle_async(&self, req: http::Request<()>, body: hyper::Body, remote_ip: SocketAddr) -> HyperResult
     {
+        // stringify the remote IP address.
+        let ip = remote_ip.ip();
+        let ip_string = if ip.is_loopback() {
+            // if it's loopback, take the value from the x-real-ip
+            // header, if present.
+            req.headers().get("x-real-ip").and_then(|s| s.to_str().ok()).map(|s| s.to_owned())
+        } else {
+            Some(match ip {
+                IpAddr::V4(ip) => ip.to_string(),
+                IpAddr::V6(ip) => ip.to_string(),
+            })
+        };
+        let ip_ref = ip_string.as_ref().map(|s| s.as_str());
+
         // see if this is a request for the root filesystem.
         let method = req.method();
         if method == &http::Method::GET || method == &http::Method::HEAD {
             if let Some((webpath, do_auth)) = self.is_realroot(req.uri()) {
                 debug!("handle_async: {:?}: handle as realroot", req.uri());
                 if do_auth {
-                    if let Err(status) = await!(self.auth(&req)) {
+                    if let Err(status) = await!(self.auth(&req, ip_ref)) {
                         return await!(self.error(status));
                     }
                 }
@@ -233,7 +247,7 @@ impl Server {
         // Could be a request for the virtual root.
         if let Some(ref users_path) = self.users_path.as_ref() {
             if path.trim_end_matches('/') == users_path.trim_end_matches('/') {
-                let pwd = match await!(self.auth(&req)) {
+                let pwd = match await!(self.auth(&req, ip_ref)) {
                     Ok(pwd) => pwd,
                     Err(status) => return await!(self.error(status)),
                 };
@@ -250,7 +264,7 @@ impl Server {
         }
 
         // authenticate now.
-        let pwd = match await!(self.auth(&req)) {
+        let pwd = match await!(self.auth(&req, ip_ref)) {
             Ok(pwd) => pwd,
             Err(status) => return await!(self.error(status)),
         };
@@ -485,12 +499,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         };
         let dav_server = dav_server.clone();
-        let make_service = move || {
+        let make_service = make_service_fn(move |socket: &AddrStream| {
             let dav_server = dav_server.clone();
+            let remote_addr = socket.remote_addr();
             hyper::service::service_fn(move |req| {
-                dav_server.handle(req)
+                dav_server.handle(req, remote_addr)
             })
-        };
+        });
         println!("Listening on http://{:?}", sockaddr);
         let server = hyper::Server::from_tcp(listener)?
             .serve(make_service)
