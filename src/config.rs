@@ -142,7 +142,7 @@ pub fn check(cfg: &str, config: &Config) {
         exit(1);
     }
     match config.webdav.locksystem.as_str() {
-        ""|"none"|"fakels|memls" => {},
+        ""|"none"|"fakels"|"memls" => {},
         _ => {
             eprintln!("{}: [webdav]: unknown locksystem: {}", cfg, config.webdav.locksystem);
             exit(1);

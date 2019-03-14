@@ -69,8 +69,18 @@ impl Server {
     // Constructor.
     pub fn new(config: Arc<config::Config>, auth: PamAuth) -> Self {
 
-        // empty handler.
-        let dh = DavHandler::new_with(DavConfig::default());
+        // any locksystem?
+        let ls = match config.webdav.locksystem.as_str() {
+            ""|"fakels" => Some(FakeLs::new() as Box<DavLockSystem>),
+            "memls" => Some(MemLs::new() as Box<DavLockSystem>),
+            _ => None,
+        };
+
+        // mostly empty handler.
+        let dh = DavHandler::new_with(DavConfig{
+            ls:     ls,
+            ..DavConfig::default()
+        });
 
         // base path of the users.
         let users_path = match config.users {
@@ -89,19 +99,6 @@ impl Server {
             pam_auth:       auth,
             config:         config,
             users_path:     Arc::new(users_path),
-        }
-    }
-
-    // Get locksystem.
-    //
-    // Should we have a config option to match the User-Agent header, so that
-    // we can only use "fakels" for certain clients (MS, OSX, davfs2) and simply
-    // not advertise locking at all to other clients?
-    fn locksystem(&self) -> Option<Box<DavLockSystem>> {
-        match self.config.webdav.locksystem.as_str() {
-            ""|"fakels" => Some(FakeLs::new()),
-            "memls" => Some(MemLs::new()),
-            _ => None,
         }
     }
 
@@ -378,7 +375,6 @@ impl Server {
         let fs = RootFs::new(&pwd.dir, user.clone(), ugid);
         let config = DavConfig {
             fs:         Some(fs),
-            ls:         self.locksystem(),
             prefix:     Some(prefix),
             principal:  Some(user),
             allow:      Some(methods),
@@ -406,7 +402,6 @@ impl Server {
         let config = DavConfig {
             prefix:     Some(prefix),
             fs:         Some(fs),
-            ls:         self.locksystem(),
             principal:  Some(pwd.name.to_string()),
             ..DavConfig::default()
         };
