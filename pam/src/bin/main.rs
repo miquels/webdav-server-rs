@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn test_auth() {
-        test_mode();
+        test_mode(true);
         let fut = lazy(move || {
                 let mut pam = PamAuth::new(None).unwrap();
                 let mut pam2 = pam.clone();
@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn test_many() {
-        test_mode();
+        test_mode(true);
         let fut = lazy(move || {
             let mut pam = PamAuth::new(None).unwrap();
             for i in 1..=1000 {

@@ -1,8 +1,7 @@
 use std::ffi::{CStr,CString};
-use std::os::raw::{c_char,c_int,c_void};
 use std::error::Error;
-
-use once_cell::sync::OnceCell;
+use std::os::raw::{c_char,c_int,c_void};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 extern {
     fn c_pam_auth(service: *const c_char, user: *const c_char, pass: *const c_char, remip: *const c_char) -> c_int;
@@ -15,9 +14,9 @@ pub(crate) const ERR_NUL_BYTE : i32 = 414243;
 pub(crate) const ERR_SEND_TO_SERVER : i32 = 414244;
 pub(crate) const ERR_RECV_FROM_SERVER : i32 = 414245;
 
-pub(crate) static TEST_MODE: OnceCell<()> = OnceCell::INIT;
+pub(crate) static TEST_MODE: AtomicUsize = AtomicUsize::new(0);
 
-/// Error returned oif authentication fails.
+/// Error returned if authentication fails.
 ///
 /// It's best not to try to interpret this, and handle all errors
 /// as "authentication failed".
@@ -73,7 +72,7 @@ impl From<std::ffi::NulError> for PamError {
 
 pub(crate) fn pam_auth(service: &str, user: &str, pass: &str, remip: &str) -> Result<(), PamError> {
 
-    if TEST_MODE.get().is_some() {
+    if TEST_MODE.load(Ordering::SeqCst) > 0 {
         return if user == "test" {
             Ok(())
         } else {

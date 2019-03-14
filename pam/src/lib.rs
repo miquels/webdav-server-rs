@@ -23,15 +23,16 @@ mod pamclient;
 mod pamserver;
 mod stream_channel;
 
+use std::sync::atomic::Ordering;
+
 pub use crate::pam::PamError;
 pub use crate::pamclient::{PamAuth, PamAuthFuture};
 
 // See bin/main.rs, mod tests.
-use std::sync::Once;
-static TEST_INIT: Once = Once::new();
 #[doc(hidden)]
-pub fn test_mode() {
+pub fn test_mode(enabled: bool) {
     use crate::pam::TEST_MODE;
-    TEST_INIT.call_once(|| TEST_MODE.set(()).unwrap());
+    let getal = if enabled { 1 } else { 0 };
+    TEST_MODE.store(getal, Ordering::SeqCst);
 }
 
