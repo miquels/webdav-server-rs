@@ -27,8 +27,7 @@
 # Webdav protocol settings.
 #
 [webdav]
-  # locksystem can be "fakels" (default) or "none". Fake locking is only
-  # advertized to Windows and OSX clients (based on User-Agent header).
+  # locksystem can be "fakels" (default), "memls" or "none".
   locksystem = "fakels"
 
 #
@@ -48,7 +47,7 @@
 [unix]
   # Cache timeout (secs). 0 disables the cache (default: 120).
   cache-timeout = 120
-  # UIDs under this value cannot login (default: 0).
+  # Accounts with a user-id lower than this value cannot login (default: 0).
   min-uid = 1000
 
 #

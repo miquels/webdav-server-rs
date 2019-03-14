@@ -41,7 +41,7 @@ use tokio;
 use pam_sandboxed::PamAuth;
 use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};
 use webdav_handler::{DavConfig, DavHandler, fs::DavFileSystem, webpath::WebPath};
-use webdav_handler::{ls::DavLockSystem, localfs::LocalFs, fakels::FakeLs};
+use webdav_handler::{ls::DavLockSystem, localfs::LocalFs, fakels::FakeLs, memls::MemLs};
 
 use crate::userfs::UserFs;
 use crate::rootfs::RootFs;
@@ -92,10 +92,15 @@ impl Server {
         }
     }
 
-    // get locksystem. FIXME: check user-agent header.
+    // Get locksystem.
+    //
+    // Should we have a config option to match the User-Agent header, so that
+    // we can only use "fakels" for certain clients (MS, OSX, davfs2) and simply
+    // not advertise locking at all to other clients?
     fn locksystem(&self) -> Option<Box<DavLockSystem>> {
         match self.config.webdav.locksystem.as_str() {
             ""|"fakels" => Some(FakeLs::new()),
+            "memls" => Some(MemLs::new()),
             _ => None,
         }
     }
