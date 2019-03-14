@@ -40,7 +40,7 @@ use tokio;
 
 use pam_sandboxed::PamAuth;
 use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};
-use webdav_handler::{DavConfig, DavHandler, webpath::WebPath};
+use webdav_handler::{DavConfig, DavHandler, fs::DavFileSystem, webpath::WebPath};
 use webdav_handler::{ls::DavLockSystem, localfs::LocalFs, fakels::FakeLs};
 
 use crate::userfs::UserFs;
@@ -56,7 +56,7 @@ pub type BoxedByteStream = Box<futures::Stream<Item = Bytes, Error = io::Error> 
 struct Server {
     dh:             DavHandler,
     pam_auth:       PamAuth,
-    users_path:     Arc<String>,
+    users_path:     Arc<Option<String>>,
     config:         Arc<config::Config>,
 }
 
@@ -68,24 +68,20 @@ impl Server {
 
     // Constructor.
     pub fn new(config: Arc<config::Config>, auth: PamAuth) -> Self {
-        let mut methods = webdav_handler::AllowedMethods::none();
-        if let Some(ref rootfs) = config.rootfs {
-            methods.add(webdav_handler::Method::Head);
-            methods.add(webdav_handler::Method::Get);
-            if rootfs.webdav.unwrap_or(true) {
-                methods.add(webdav_handler::Method::PropFind);
-                methods.add(webdav_handler::Method::Options);
-            }
-        }
-        let dh = DavHandler::new_with(DavConfig{
-            allow:  Some(methods),
-            ..DavConfig::default()
-        });
+
+        // empty handler.
+        let dh = DavHandler::new_with(DavConfig::default());
 
         // base path of the users.
         let users_path = match config.users {
-            Some(ref users) => users.path.replace(":username", ""),
-            None => "-".to_string(),
+            Some(ref users) => {
+                if users.path.contains(":username") {
+                    Some(users.path.replace(":username", ""))
+                } else {
+                    None
+                }
+            },
+            None => None,
         };
 
         Server{
@@ -118,32 +114,28 @@ impl Server {
         }
     }
 
-    // check the initial path. it must match either the rootfs,
-    // or the path to the users part of the hierarchy.
-    fn check_path(&self, uri: &http::uri::Uri) -> Result<(String, String, bool), StatusCode> {
-
-        // first normalize the path.
-        let path = match WebPath::from_uri(uri, "") {
-            Ok(path) => path.as_utf8_string_with_prefix(),
-            Err(_) => return Err(StatusCode::BAD_REQUEST),
+    // check if this is the root filesystem.
+    fn is_realroot(&self, uri: &http::uri::Uri) -> Option<(WebPath, bool)>
+    {
+        // is a rootfs configured?
+        let rootfs = match self.config.rootfs {
+            Some(ref rootfs) => rootfs,
+            None => return None,
         };
 
-        // get first segment of the path.
-        let x = path.splitn(3, "/").collect::<Vec<&str>>();
-        if x.len() < 2 {
-            // can't happen, means there was no "/" in the path.
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        let is_root = x.len() < 3;
-        let first_seg = x[1].to_string();
+        // check prefix.
+        let webpath = match WebPath::from_uri(uri, &rootfs.path) {
+            Ok(path) => path,
+            Err(_) => return None,
+        };
 
-        // Either it's the root filesystem, or the prefix must match.
-        debug!("XXX path: {}, users_path: {}", path, self.users_path);
-        if (is_root && self.config.rootfs.is_some()) || path.starts_with(self.users_path.as_str()) {
-            Ok((path, first_seg, is_root))
-        } else {
-            Err(StatusCode::NOT_FOUND)
+        // only files one level deep.
+        let nseg = webpath.num_segments();
+        if nseg > 1 || (nseg == 1 && webpath.is_collection()) {
+            return None;
         }
+
+        Some((webpath, rootfs.auth))
     }
 
     // futures 0.1 adapter.
@@ -178,28 +170,9 @@ impl Server {
         }.boxed().compat()
     }
 
-    // handle a request.
-    async fn handle_async(&self, req: http::Request<()>, body: hyper::Body) -> HyperResult
+    // authenticate user.
+    async fn auth<'a>(&'a self, req: &'a http::Request<()>) -> Result<Arc<unixuser::User>, StatusCode>
     {
-        // interpret the path.
-        let (path, first_seg, is_root) = match self.check_path(req.uri()) {
-            Ok(x) => x,
-            Err(status) => return await!(self.error(status)),
-        };
-
-        // If we ask for "/" or "/file" with GET or HEAD, serve from local fs.
-        let mut is_realroot = false;
-        let method = req.method();
-        if is_root && (method == &http::Method::GET || method == &http::Method::HEAD) {
-            // if rootfs.auth is set, wait until after authentication.
-            if let Some(ref rootfs) = self.config.rootfs {
-                if rootfs.auth == false {
-                    return await!(self.handle_realroot(req, body, first_seg));
-                }
-            }
-            is_realroot = true;
-        }
-
         // we must have a login/pass
         let (user, pass) = match req.headers().typed_get::<Authorization<Basic>>() {
             Some(Authorization(Basic{
@@ -207,44 +180,86 @@ impl Server {
                                 password: Some(password)
                             }
             )) => (username, password),
-            _ => return await!(self.error(StatusCode::UNAUTHORIZED)),
+            _ => return Err(StatusCode::UNAUTHORIZED),
         };
 
-        // start by checking if user exists.
+        // check if user exists.
         let pwd = match await!(cached::unixuser(&user)) {
             Ok(pwd) => pwd,
-            Err(_) => return await!(self.error(StatusCode::UNAUTHORIZED)),
+            Err(_) => return Err(StatusCode::UNAUTHORIZED),
         };
 
+        // authenticate.
         let service = self.config.pam.service.as_str();
         let pam_auth = self.pam_auth.clone();
         if let Err(_) = await!(cached::pam_auth(pam_auth, service, &pwd.name, &pass, None)) {
-            return await!(self.error(StatusCode::UNAUTHORIZED));
+            return Err(StatusCode::UNAUTHORIZED);
         }
 
         // check minimum uid
         if let Some(min_uid) = self.config.unix.min_uid {
             if pwd.uid < min_uid {
-                debug!("Server::handle: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
-                return await!(self.error(StatusCode::UNAUTHORIZED));
+                debug!("Server::auth: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        }
+        Ok(pwd)
+    }
+
+    // handle a request.
+    async fn handle_async(&self, req: http::Request<()>, body: hyper::Body) -> HyperResult
+    {
+        // see if this is a request for the root filesystem.
+        let method = req.method();
+        if method == &http::Method::GET || method == &http::Method::HEAD {
+            if let Some((webpath, do_auth)) = self.is_realroot(req.uri()) {
+                debug!("handle_async: {:?}: handle as realroot", req.uri());
+                if do_auth {
+                    if let Err(status) = await!(self.auth(&req)) {
+                        return await!(self.error(status));
+                    }
+                }
+                return await!(self.handle_realroot(req, body, webpath));
+            }
+            debug!("handle_async: {:?}: not realroot", req.uri());
+        }
+
+        // Normalize the path.
+        let path = match WebPath::from_uri(req.uri(), "") {
+            Ok(path) => path.as_utf8_string_with_prefix(),
+            Err(_) => return await!(self.error(StatusCode::BAD_REQUEST)),
+        };
+
+        // Could be a request for the virtual root.
+        if let Some(ref users_path) = self.users_path.as_ref() {
+            if path.trim_end_matches('/') == users_path.trim_end_matches('/') {
+                let pwd = match await!(self.auth(&req)) {
+                    Ok(pwd) => pwd,
+                    Err(status) => return await!(self.error(status)),
+                };
+                debug!("handle_async: {:?}: handle as virtualroot", req.uri());
+                return await!(self.handle_virtualroot(req, body, pwd));
             }
         }
 
-        // rootfs GET/HEAD delayed until after auth.
-        if is_realroot {
-            return await!(self.handle_realroot(req, body, first_seg));
+        // is this the users part of the path?
+        let prefix = self.user_path("");
+        if !path.starts_with(&prefix) {
+            debug!("handle_async: {}: doesn't match start with {}", path, prefix);
+            return await!(self.error(StatusCode::NOT_FOUND));
         }
 
-        // could be virtual root for PROPFIND/OPTIONS.
-        if is_root {
-            return await!(self.handle_virtualroot(req, body, pwd));
-        }
+        // authenticate now.
+        let pwd = match await!(self.auth(&req)) {
+            Ok(pwd) => pwd,
+            Err(status) => return await!(self.error(status)),
+        };
 
         // Check if username matches basedir.
-        let prefix = self.user_path(&user);
+        let prefix = self.user_path(&pwd.name);
         if !path.starts_with(&prefix) {
             // in /<something>/ but doesn't match /:user/
-            debug!("Server::handle: user {} prefix {} path {} -> 401", user, prefix, path);
+            debug!("Server::handle: user {} prefix {} path {} -> 401", pwd.name, prefix, path);
             return await!(self.error(StatusCode::UNAUTHORIZED));
         }
 
@@ -275,37 +290,46 @@ impl Server {
     }
 
     // serve from the local filesystem.
-    async fn handle_realroot(&self, req: http::Request<()>, body: hyper::Body, first_seg: String) -> HyperResult
+    async fn handle_realroot(&self, req: http::Request<()>, body: hyper::Body, webpath: WebPath) -> HyperResult
     {
-        // If this part of the path is a valid user, redirect.
-        // Otherwise serve from the local filesystem.
-        if let Ok(_) = await!(cached::unixuser(&first_seg)) {
-            // first path segment is a valid username.
-            debug!("Server::handle_realroot: redirect to /{}/", first_seg);
-            return await!(self.redirect("/".to_string() + &first_seg + "/"));
-        }
-
-        // is a rootfs configured?
-        let rootfs = match self.config.rootfs {
-            Some(ref rootfs) => rootfs,
-            None => return await!(self.error(StatusCode::NOT_FOUND)),
+        // get filename.
+        let mut webpath = webpath;
+        let mut filename = match std::str::from_utf8(webpath.file_name()) {
+            Ok(n) => n,
+            Err(_) => return await!(self.error(StatusCode::NOT_FOUND)),
         };
 
+        let rootfs = self.config.rootfs.as_ref().unwrap();
         debug!("Server::handle_realroot: serving {:?}", req.uri());
 
         // index.html?
         let mut req = req;
-        if first_seg == "" {
+        if filename == "" {
             let index = rootfs.index.as_ref().map(|s| s.as_str()).unwrap_or("index.html");
-            let index = "/".to_string() + index;
-            if let Ok(pq) = http::uri::PathAndQuery::from_shared(index.into()) {
+            filename = index;
+            webpath.push_segment(index.as_bytes());
+            let path = webpath.as_url_string_with_prefix();
+            if let Ok(pq) = http::uri::PathAndQuery::from_shared(path.into()) {
                 let mut parts = req.uri().clone().into_parts();
                 parts.path_and_query = Some(pq);
                 *req.uri_mut() = http::uri::Uri::from_parts(parts).unwrap();
             }
         }
 
+        // see if file exists.
         let fs = LocalFs::new(&rootfs.directory, true);
+        if await!(fs.metadata(&webpath)).is_err() {
+            // it doesn't. see if it matches a valid username.
+            match await!(cached::unixuser(&filename)) {
+                Ok(_) => {
+                    debug!("Server::handle_realroot: redirect to /{}/", filename);
+                    return await!(self.redirect("/".to_string() + &filename + "/"));
+                },
+                Err(_) => return await!(self.error(StatusCode::NOT_FOUND)),
+            }
+        }
+
+        // serve.
         let config = DavConfig {
             fs:         Some(fs),
             ..DavConfig::default()
@@ -317,31 +341,28 @@ impl Server {
     async fn handle_virtualroot(&self, req: http::Request<()>, body: hyper::Body, pwd: Arc<unixuser::User>)
         -> HyperResult
     {
-        // is a rootfs configured?
-        let _rootfs = match self.config.rootfs {
-            Some(ref rootfs) => rootfs,
-            None => return await!(self.error(StatusCode::NOT_FOUND)),
-        };
-
         debug!("Server::handle_virtualroot: /");
         let ugid = match self.config.accounts.setuid {
             true => Some((pwd.uid, pwd.gid)),
             false => None,
         };
+        let user = pwd.name.clone();
 
-        // Only pass in the user if the base of the users tree
-        // is the same as the base root directory (right now always "/").
-        let user = if self.users_path.as_str() == "/" {
-            pwd.name.clone()
-        } else {
-            "".to_string()
-        };
+        let mut methods = webdav_handler::AllowedMethods::none();
+        methods.add(webdav_handler::Method::Head);
+        methods.add(webdav_handler::Method::Get);
+        methods.add(webdav_handler::Method::PropFind);
+        methods.add(webdav_handler::Method::Options);
 
-        let fs = RootFs::new(&pwd.dir, user, ugid);
+        let prefix = self.users_path.as_ref().clone().unwrap();
+
+        let fs = RootFs::new(&pwd.dir, user.clone(), ugid);
         let config = DavConfig {
             fs:         Some(fs),
             ls:         self.locksystem(),
-            principal:  Some(pwd.name.to_string()),
+            prefix:     Some(prefix),
+            principal:  Some(user),
+            allow:      Some(methods),
             ..DavConfig::default()
         };
         await!(self.run_davhandler(req, body, config))

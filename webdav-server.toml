@@ -57,23 +57,17 @@
 # This serves an index.html to GET/HEAD "/" requests from browsers.
 # It also serves any other files present in the directory.
 #
-# If "auth" is set, browser clients must login to see the content.
-#
-# If "webdav"  is set, then:
-# - all methods other than GET/HEAD will force authentication
-# - OPTIONS "/" will return a reasonable result
-# - PROPFIND "/" will return one entry, for "/username/" (the clients username)
-# - all other methods will return a 405 status code.
+# If "auth" is set, browser clients must authenticate to see the content.
 #
 [rootfs]
+  # URL path to this directory.
+  path = "/"
   # Directory to serve.
   directory = "/var/www/html"
   # Index file (default: "index.html").
   index = "index.html"
-  # Force authentication even for simple GET/HEAD requests (default: false).
+  # Client must authenticate (default: false).
   auth = false
-  # Enable PROPFIND and OPTIONS for webdav clients (authenticated) (default: true).
-  webdav = true
 
 #
 # Users.
@@ -87,5 +81,8 @@
 [users]
   # Path. If this contains ":username", then that part of the path
   # must match the username. Most common setting here is "/:username".
+  # In that case, a request for the path _without_ ":username" will
+  # result in a virtual directory containing 1 item, the username
+  # sent by the client.
   path = "/:username"
 

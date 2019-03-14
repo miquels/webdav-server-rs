@@ -65,6 +65,7 @@ pub struct Unix {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct RootFs {
+    pub path:       String,
     pub directory:  String,
     pub index:      Option<String>,
     #[serde(default)]
@@ -154,6 +155,12 @@ pub fn check(cfg: &str, config: &Config) {
     if config.accounts.setuid && (config.server.uid.is_none() || config.server.gid.is_none()) {
         eprintln!("{}: [server]: missing uid and/or gid", cfg);
         exit(1);
+    }
+    if let Some(ref users) = config.users {
+        if users.path.contains(":username") && !users.path.ends_with(":username") {
+            eprintln!("{}: [users]: :username must be at the end of the path", cfg);
+            exit(1);
+        }
     }
 }
 
