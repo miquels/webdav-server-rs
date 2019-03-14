@@ -424,7 +424,6 @@ impl Server {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
 
     // command line option processing.
     let matches = clap_app!(webdav_server =>
@@ -432,7 +431,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (@arg CFG: -c --config +takes_value "configuration file (/etc/webdav-server.toml)")
         (@arg PORT: -p --port +takes_value "listen to this port on localhost only")
         (@arg DIR: -d --dir +takes_value "override local directory to serve")
+        (@arg DBG: -D --debug "enable debug level logging")
     ).get_matches();
+
+    if matches.is_present("DBG") {
+        use env_logger::Env;
+        let level = "webdav_server=debug,webdav_handler=debug";
+        env_logger::from_env(Env::default().default_filter_or(level)).init();
+    } else {
+        env_logger::init();
+    }
 
     let dir = matches.value_of("DIR");
     let port = matches.value_of("PORT");
