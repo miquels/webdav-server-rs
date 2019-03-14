@@ -1,8 +1,9 @@
 # WEBDAV-SERVER
 
 An implementation of a webdav server with support for user accounts,
-and running switching uid/gid to those users accounts. That last
-feature is Linux-only, since no other OSes have thread-local credentials.
+and switching uid/gid to those users accounts. That last feature
+is Linux-only, since the server is threaded and no other OSes have
+support for thread-local credentials.
 
 Uses PAM authentication and local unix accounts.
 
@@ -13,7 +14,7 @@ enforcing a maximum number of connections, and timeouts.
 
 ## Configuration.
 
-See the [example webdav-server.toml file](blob/master/webdav-server.toml)
+See the [example webdav-server.toml file](webdav-server.toml)
 
 ## Notes.
 
