@@ -1,27 +1,30 @@
+# WEBDAV-SERVER
 
-## webdav-server
-
-An implementation of a webdav server with support for user accounts.
+An implementation of a webdav server with support for user accounts,
+and running switching uid/gid to those users accounts. That last
+feature is Linux-only, since no other OSes have thread-local credentials.
 
 Uses PAM authentication and local unix accounts.
 
-An nginx proxy is used in front of this software for:
+This server does not implement TLS or logging. For now, it is assumed that
+most users of this software want to put an NGNIX or Apache reverse-proxy
+in front of it anyway, and that frontend can implement TLS, logging,
+enforcing a maximum number of connections, and timeouts.
 
-- TLS offload
-- enforcing a max #of open connections
-- logging
+## Configuration.
 
-# Implementation notes:
+See the [example webdav-server.toml file](blob/master/webdav-server.toml)
 
-- PAM is run in a separate process for the following reasons:
-  * pam sometimes want to call setuid()/setreuid(). We use the setresuid
-    systemcall directly, and the glibc thread-aware implementation
-    of the setuid calls doesn't like that and abort.
-  * PAM wants to run as root, we want to run with lower priviliges and
-    eventually block uid 0 completely (using seccomp-bpf for example)
-  * The PAM version that comes with debian in some cases tried to
-    close all fildescriptors 1 .. ulimit-hard-max, which is 1M. We lower
-    the NOFILE limit in the child process to 256.
+## Notes.
 
-- Successful PAM and getpwnam() lookups are cached for 120 seconds.
+The built-in PAM client will add the client IP address to PAM requests.
+If the client IP adress is localhost (127/8 or ::1) then the content of
+the X-Real-IP header is used instead (if present) to allow for afore-mentioned
+frontend proxies.
+
+## Copyright and License.
+
+ * © 2018, 2019 XS4ALL Internet bv
+ * © 2018, 2019 Miquel van Smoorenburg
+ * [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0)
 

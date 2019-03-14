@@ -25,3 +25,9 @@ Reasons for doing this instead of just calling libpam directly:
   calling the setresuid syscall directly, the pthread library code that
   handles setuid() gets confused.
 
+## Copyright and License.
+
+ * © 2018, 2019 XS4ALL Internet bv
+ * © 2018, 2019 Miquel van Smoorenburg
+ * [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0)
+

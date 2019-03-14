@@ -3,6 +3,7 @@ name = "webdav-server"
 version = "0.1.0"
 authors = ["Miquel van Smoorenburg <mikevs@xs4all.net>"]
 edition = "2018"
+license = "Apache-2.0"
 
 [workspace]
 
@@ -10,7 +11,7 @@ edition = "2018"
 bytes = "0.4.12"
 clap = "2.32.0"
 env_logger = "0.6.1"
-fs_quota = { path = "fs_quota", version = "0.1.0" }
+fs-quota = { path = "fs_quota", version = "0.1.0" }
 futures = "0.1.25"
 futures03 = { package = "futures-preview", version = "0.3.0-alpha.13", features = ["io-compat"] }
 http = "0.1.16"

@@ -1,7 +1,8 @@
 [package]
-name = "fs_quota"
+name = "fs-quota"
 version = "0.1.0"
 authors = ["Miquel van Smoorenburg <mikevs@xs4all.net>"]
+license = "Apache-2.0"
 
 [build-dependencies]
 cc = "1.0.29"
