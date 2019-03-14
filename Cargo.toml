@@ -1,5 +1,5 @@
 [package]
-name = "webdav-server-rs"
+name = "webdav-server"
 version = "0.1.0"
 authors = ["Miquel van Smoorenburg <mikevs@xs4all.net>"]
 edition = "2018"
