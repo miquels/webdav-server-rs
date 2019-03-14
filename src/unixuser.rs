@@ -1,8 +1,8 @@
 use std;
+use std::ffi::{CStr, OsStr};
 use std::io;
-use std::path::{Path,PathBuf};
-use std::ffi::{CStr,OsStr};
 use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
 
 use futures03::compat::Future01CompatExt;
 use futures03::FutureExt;
@@ -10,7 +10,7 @@ use futures03::FutureExt;
 use tokio_threadpool;
 
 use libc;
-use libc::{getpwnam_r,getpwuid_r,c_char};
+use libc::{c_char, getpwnam_r, getpwuid_r};
 
 #[derive(Debug)]
 pub struct User {
@@ -41,7 +41,7 @@ unsafe fn to_passwd(pwd: &libc::passwd) -> User {
     let cs_shell = cptr_to_path(pwd.pw_shell);
 
     // then turn the slices into safe owned values.
-    User{
+    User {
         name:   cs_name.to_string_lossy().into_owned(),
         passwd: cs_passwd.to_string_lossy().into_owned(),
         gecos:  cs_gecos.to_string_lossy().into_owned(),
@@ -55,7 +55,7 @@ unsafe fn to_passwd(pwd: &libc::passwd) -> User {
 impl User {
     pub fn by_name(name: &str) -> Result<User, io::Error> {
         let mut buf = [0; 1024];
-        let mut pwd: libc::passwd = unsafe {std::mem::zeroed()};
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
         let mut result: *mut libc::passwd = std::ptr::null_mut();
 
         let cname = match std::ffi::CString::new(name) {
@@ -63,10 +63,13 @@ impl User {
             Err(_) => return Err(io::Error::from_raw_os_error(libc::ENOENT)),
         };
         let ret = unsafe {
-            getpwnam_r(cname.as_ptr(), &mut pwd as *mut _,
-                       buf.as_mut_ptr(),
-                       buf.len() as libc::size_t,
-                       &mut result as *mut _)
+            getpwnam_r(
+                cname.as_ptr(),
+                &mut pwd as *mut _,
+                buf.as_mut_ptr(),
+                buf.len() as libc::size_t,
+                &mut result as *mut _,
+            )
         };
         if ret == 0 {
             if result.is_null() {
@@ -82,14 +85,17 @@ impl User {
     #[allow(dead_code)]
     pub fn by_uid(uid: u32) -> Result<User, io::Error> {
         let mut buf = [0; 1024];
-        let mut pwd: libc::passwd = unsafe {std::mem::zeroed()};
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
         let mut result: *mut libc::passwd = std::ptr::null_mut();
 
         let ret = unsafe {
-            getpwuid_r(uid, &mut pwd as *mut _,
-                       buf.as_mut_ptr(),
-                       buf.len() as libc::size_t,
-                       &mut result as *mut _)
+            getpwuid_r(
+                uid,
+                &mut pwd as *mut _,
+                buf.as_mut_ptr(),
+                buf.len() as libc::size_t,
+                &mut result as *mut _,
+            )
         };
         if ret == 0 {
             if result.is_null() {
@@ -103,16 +109,14 @@ impl User {
     }
 
     pub async fn by_name_async(name: &str) -> Result<User, io::Error> {
-        let fut = futures::future::poll_fn(move || {
-            tokio_threadpool::blocking(move ||  User::by_name(name))
-        })
-        .compat()
-        .then(|res| match res {
-                Ok(x) => futures03::future::ready(x),
-                Err(_) => panic!("the thread pool has shut down"),
+        let fut = futures::future::poll_fn(move || tokio_threadpool::blocking(move || User::by_name(name)))
+            .compat()
+            .then(|res| {
+                match res {
+                    Ok(x) => futures03::future::ready(x),
+                    Err(_) => panic!("the thread pool has shut down"),
+                }
             });
         await!(fut)
     }
-
 }
-

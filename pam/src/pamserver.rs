@@ -7,27 +7,26 @@ use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::sync::{Arc, Mutex};
 
-use bincode::{serialize, deserialize};
+use bincode::{deserialize, serialize};
 use libc;
 
-use crate::pam::{PamError, pam_lower_rlimits, pam_auth};
+use crate::pam::{pam_auth, pam_lower_rlimits, PamError};
 use crate::pamclient::PamRequest;
 
 // Response back from the server process.
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PamResponse {
-    pub id:         u64,
-    pub result:     Result<(), PamError>,
+    pub id:     u64,
+    pub result: Result<(), PamError>,
 }
 
 // server side.
 pub(crate) struct PamServer {
-    rx_socket:   StdUnixStream,
-    tx_socket:   Arc<Mutex<StdUnixStream>>,
+    rx_socket: StdUnixStream,
+    tx_socket: Arc<Mutex<StdUnixStream>>,
 }
 
 impl PamServer {
-
     // fork and start the server, return the stream socket for communication.
     pub(crate) fn start(num_threads: Option<usize>) -> Result<StdUnixStream, io::Error> {
         // Create a unix socketpair for communication.
@@ -43,9 +42,9 @@ impl PamServer {
         if pid == 0 {
             // child process.
             drop(sock1);
-            let mut server = PamServer{
-                rx_socket:  sock2,
-                tx_socket:  Arc::new(Mutex::new(sock3)),
+            let mut server = PamServer {
+                rx_socket: sock2,
+                tx_socket: Arc::new(Mutex::new(sock3)),
             };
             pam_lower_rlimits();
             trace!("PamServer: child: starting server");
@@ -61,7 +60,6 @@ impl PamServer {
 
     // serve requests.
     fn serve(&mut self, num_threads: usize) {
-
         // create a threadpool, then serve connections via the threadpool.
         let pool = threadpool::ThreadPool::new(num_threads);
 
@@ -96,8 +94,12 @@ impl PamServer {
                 Ok(req) => req,
                 Err(_) => panic!("PamServer::serve: error deserializing request"),
             };
-            trace!("PamServer::serve: read request {:?} active threads: {} queued {}",
-                   req, pool.active_count(), pool.queued_count());
+            trace!(
+                "PamServer::serve: read request {:?} active threads: {} queued {}",
+                req,
+                pool.active_count(),
+                pool.queued_count()
+            );
 
             // run request on pool.
             let sock = self.tx_socket.clone();
@@ -109,8 +111,12 @@ impl PamServer {
             let mut i = 0;
             while pool.queued_count() > 2 * pool.max_count() {
                 if i == 399 {
-                    debug!("PamServer::serve: pool busy! active {}, max {}, queued: {}",
-                           pool.active_count(), pool.max_count(), pool.queued_count());
+                    debug!(
+                        "PamServer::serve: pool busy! active {}, max {}, queued: {}",
+                        pool.active_count(),
+                        pool.max_count(),
+                        pool.queued_count()
+                    );
                 }
                 i += 1;
                 i = i % 400;

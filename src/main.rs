@@ -9,10 +9,14 @@
 //!
 #![feature(async_await, await_macro, futures_api)]
 
-#[macro_use] extern crate clap;
-#[macro_use] extern crate log;
-#[macro_use] extern crate lazy_static;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate clap;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate lazy_static;
+#[macro_use]
+extern crate serde_derive;
 
 mod cache;
 mod cached;
@@ -30,22 +34,22 @@ use std::sync::Arc;
 use bytes::Bytes;
 use env_logger;
 use futures::{future, Future, Stream};
-use futures03::{FutureExt, TryFutureExt};
 use futures03::compat::Future01CompatExt;
-use hyper::{self, service::make_service_fn, server::conn::AddrStream};
+use futures03::{FutureExt, TryFutureExt};
 use http;
 use http::status::StatusCode;
+use hyper::{self, server::conn::AddrStream, service::make_service_fn};
 use net2;
 use tokio;
 
 use pam_sandboxed::PamAuth;
-use webdav_handler::typed_headers::{HeaderMapExt, Authorization, Basic};
-use webdav_handler::{DavConfig, DavHandler, fs::DavFileSystem, webpath::WebPath};
-use webdav_handler::{ls::DavLockSystem, localfs::LocalFs, fakels::FakeLs, memls::MemLs};
+use webdav_handler::typed_headers::{Authorization, Basic, HeaderMapExt};
+use webdav_handler::{fakels::FakeLs, localfs::LocalFs, ls::DavLockSystem, memls::MemLs};
+use webdav_handler::{fs::DavFileSystem, webpath::WebPath, DavConfig, DavHandler};
 
-use crate::userfs::UserFs;
 use crate::rootfs::RootFs;
 use crate::suid::switch_ugid;
+use crate::userfs::UserFs;
 
 static PROGNAME: &'static str = "webdav-server";
 
@@ -54,10 +58,10 @@ pub type BoxedByteStream = Box<futures::Stream<Item = Bytes, Error = io::Error> 
 // Contains "state" and a handle to the config.
 #[derive(Clone)]
 struct Server {
-    dh:             DavHandler,
-    pam_auth:       PamAuth,
-    users_path:     Arc<Option<String>>,
-    config:         Arc<config::Config>,
+    dh:         DavHandler,
+    pam_auth:   PamAuth,
+    users_path: Arc<Option<String>>,
+    config:     Arc<config::Config>,
 }
 
 #[allow(dead_code)]
@@ -65,20 +69,18 @@ type HyperResult = Result<hyper::Response<hyper::Body>, io::Error>;
 
 // Server implementation.
 impl Server {
-
     // Constructor.
     pub fn new(config: Arc<config::Config>, auth: PamAuth) -> Self {
-
         // any locksystem?
         let ls = match config.webdav.locksystem.as_str() {
-            ""|"fakels" => Some(FakeLs::new() as Box<DavLockSystem>),
+            "" | "fakels" => Some(FakeLs::new() as Box<DavLockSystem>),
             "memls" => Some(MemLs::new() as Box<DavLockSystem>),
             _ => None,
         };
 
         // mostly empty handler.
-        let dh = DavHandler::new_with(DavConfig{
-            ls:     ls,
+        let dh = DavHandler::new_with(DavConfig {
+            ls: ls,
             ..DavConfig::default()
         });
 
@@ -94,11 +96,11 @@ impl Server {
             None => None,
         };
 
-        Server{
-            dh:             dh,
-            pam_auth:       auth,
-            config:         config,
-            users_path:     Arc::new(users_path),
+        Server {
+            dh:         dh,
+            pam_auth:   auth,
+            config:     config,
+            users_path: Arc::new(users_path),
         }
     }
 
@@ -117,8 +119,7 @@ impl Server {
     }
 
     // check if this is the root filesystem.
-    fn is_realroot(&self, uri: &http::uri::Uri) -> Option<(WebPath, bool)>
-    {
+    fn is_realroot(&self, uri: &http::uri::Uri) -> Option<(WebPath, bool)> {
         // is a rootfs configured?
         let rootfs = match self.config.rootfs {
             Some(ref rootfs) => rootfs,
@@ -141,8 +142,11 @@ impl Server {
     }
 
     // futures 0.1 adapter.
-    fn handle(&self, req: hyper::Request<hyper::Body>, remote_ip: SocketAddr)
-        -> impl Future<Item=hyper::Response<hyper::Body>, Error=io::Error> + Send + 'static
+    fn handle(
+        &self,
+        req: hyper::Request<hyper::Body>,
+        remote_ip: SocketAddr,
+    ) -> impl Future<Item = hyper::Response<hyper::Body>, Error = io::Error> + Send + 'static
     {
         // NOTE: we move the body out of the request, and pass it seperatly.
         //
@@ -167,21 +171,24 @@ impl Server {
         let (parts, body) = req.into_parts();
         let req = http::Request::from_parts(parts, ());
         let self2 = self.clone();
-        async move {
-            await!(self2.handle_async(req, body, remote_ip))
-        }.boxed().compat()
+        async move { await!(self2.handle_async(req, body, remote_ip)) }
+            .boxed()
+            .compat()
     }
 
     // authenticate user.
-    async fn auth<'a>(&'a self, req: &'a http::Request<()>, remote_ip: Option<&'a str>) -> Result<Arc<unixuser::User>, StatusCode>
+    async fn auth<'a>(
+        &'a self,
+        req: &'a http::Request<()>,
+        remote_ip: Option<&'a str>,
+    ) -> Result<Arc<unixuser::User>, StatusCode>
     {
         // we must have a login/pass
         let (user, pass) = match req.headers().typed_get::<Authorization<Basic>>() {
-            Some(Authorization(Basic{
-                                username,
-                                password: Some(password)
-                            }
-            )) => (username, password),
+            Some(Authorization(Basic {
+                username,
+                password: Some(password),
+            })) => (username, password),
             _ => return Err(StatusCode::UNAUTHORIZED),
         };
 
@@ -201,7 +208,10 @@ impl Server {
         // check minimum uid
         if let Some(min_uid) = self.config.unix.min_uid {
             if pwd.uid < min_uid {
-                debug!("Server::auth: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
+                debug!(
+                    "Server::auth: {}: uid {} too low (<{})",
+                    pwd.name, pwd.uid, min_uid
+                );
                 return Err(StatusCode::UNAUTHORIZED);
             }
         }
@@ -209,14 +219,22 @@ impl Server {
     }
 
     // handle a request.
-    async fn handle_async(&self, req: http::Request<()>, body: hyper::Body, remote_ip: SocketAddr) -> HyperResult
+    async fn handle_async(
+        &self,
+        req: http::Request<()>,
+        body: hyper::Body,
+        remote_ip: SocketAddr,
+    ) -> HyperResult
     {
         // stringify the remote IP address.
         let ip = remote_ip.ip();
         let ip_string = if ip.is_loopback() {
             // if it's loopback, take the value from the x-real-ip
             // header, if present.
-            req.headers().get("x-real-ip").and_then(|s| s.to_str().ok()).map(|s| s.to_owned())
+            req.headers()
+                .get("x-real-ip")
+                .and_then(|s| s.to_str().ok())
+                .map(|s| s.to_owned())
         } else {
             Some(match ip {
                 IpAddr::V4(ip) => ip.to_string(),
@@ -275,7 +293,10 @@ impl Server {
         let prefix = self.user_path(&pwd.name);
         if !path.starts_with(&prefix) {
             // in /<something>/ but doesn't match /:user/
-            debug!("Server::handle: user {} prefix {} path {} -> 401", pwd.name, prefix, path);
+            debug!(
+                "Server::handle: user {} prefix {} path {} -> 401",
+                pwd.name, prefix, path
+            );
             return await!(self.error(StatusCode::UNAUTHORIZED));
         }
 
@@ -284,13 +305,22 @@ impl Server {
     }
 
     async fn error(&self, code: StatusCode) -> HyperResult {
-        let msg = format!("<error>{} {}</error>\n",
-                          code.as_u16(), code.canonical_reason().unwrap_or(""));
+        let msg = format!(
+            "<error>{} {}</error>\n",
+            code.as_u16(),
+            code.canonical_reason().unwrap_or("")
+        );
         let mut response = hyper::Response::builder();
         response.status(code);
         response.header("Content-Type", "text/xml");
         if code == StatusCode::UNAUTHORIZED {
-            let realm = self.config.accounts.realm.as_ref().map(|s| s.as_str()).unwrap_or("Webdav Server");
+            let realm = self
+                .config
+                .accounts
+                .realm
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or("Webdav Server");
             response.header("WWW-Authenticate", format!("Basic realm=\"{}\"", realm).as_str());
         }
         Ok(response.body(msg.into()).unwrap())
@@ -301,12 +331,18 @@ impl Server {
             .status(302)
             .header("content-type", "text/plain")
             .header("location", path)
-            .body("302 Moved\n".into()).unwrap();
+            .body("302 Moved\n".into())
+            .unwrap();
         Ok(resp)
     }
 
     // serve from the local filesystem.
-    async fn handle_realroot(&self, req: http::Request<()>, body: hyper::Body, webpath: WebPath) -> HyperResult
+    async fn handle_realroot(
+        &self,
+        req: http::Request<()>,
+        body: hyper::Body,
+        webpath: WebPath,
+    ) -> HyperResult
     {
         // get filename.
         let mut webpath = webpath;
@@ -347,15 +383,19 @@ impl Server {
 
         // serve.
         let config = DavConfig {
-            fs:         Some(fs),
+            fs: Some(fs),
             ..DavConfig::default()
         };
         await!(self.run_davhandler(req, body, config))
     }
 
     // virtual root filesytem for PROPFIND/OPTIONS in "/".
-    async fn handle_virtualroot(&self, req: http::Request<()>, body: hyper::Body, pwd: Arc<unixuser::User>)
-        -> HyperResult
+    async fn handle_virtualroot(
+        &self,
+        req: http::Request<()>,
+        body: hyper::Body,
+        pwd: Arc<unixuser::User>,
+    ) -> HyperResult
     {
         debug!("Server::handle_virtualroot: /");
         let ugid = match self.config.accounts.setuid {
@@ -374,17 +414,22 @@ impl Server {
 
         let fs = RootFs::new(&pwd.dir, user.clone(), ugid);
         let config = DavConfig {
-            fs:         Some(fs),
-            prefix:     Some(prefix),
-            principal:  Some(user),
-            allow:      Some(methods),
+            fs: Some(fs),
+            prefix: Some(prefix),
+            principal: Some(user),
+            allow: Some(methods),
             ..DavConfig::default()
         };
         await!(self.run_davhandler(req, body, config))
     }
 
-    async fn handle_user(&self, req: http::Request<()>, body: hyper::Body, prefix: String, pwd: Arc<unixuser::User>)
-        -> HyperResult
+    async fn handle_user(
+        &self,
+        req: http::Request<()>,
+        body: hyper::Body,
+        prefix: String,
+        pwd: Arc<unixuser::User>,
+    ) -> HyperResult
     {
         // do we have a users section?
         let _users = match self.config.users {
@@ -400,16 +445,20 @@ impl Server {
 
         debug!("Server::handle_user: in userdir {} prefix {} ", pwd.name, prefix);
         let config = DavConfig {
-            prefix:     Some(prefix),
-            fs:         Some(fs),
-            principal:  Some(pwd.name.to_string()),
+            prefix: Some(prefix),
+            fs: Some(fs),
+            principal: Some(pwd.name.to_string()),
             ..DavConfig::default()
         };
         await!(self.run_davhandler(req, body, config))
     }
 
-    async fn run_davhandler(&self, req: http::Request<()>, body: hyper::Body, config: DavConfig)
-        -> HyperResult
+    async fn run_davhandler(
+        &self,
+        req: http::Request<()>,
+        body: hyper::Body,
+        config: DavConfig,
+    ) -> HyperResult
     {
         // move body back into request.
         let (parts, _) = req.into_parts();
@@ -424,7 +473,6 @@ impl Server {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     // command line option processing.
     let matches = clap_app!(webdav_server =>
         (version: "0.1")
@@ -432,7 +480,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (@arg PORT: -p --port +takes_value "listen to this port on localhost only")
         (@arg DIR: -d --dir +takes_value "override local directory to serve")
         (@arg DBG: -D --debug "enable debug level logging")
-    ).get_matches();
+    )
+    .get_matches();
 
     if matches.is_present("DBG") {
         use env_logger::Env;
@@ -510,9 +559,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let make_service = make_service_fn(move |socket: &AddrStream| {
             let dav_server = dav_server.clone();
             let remote_addr = socket.remote_addr();
-            hyper::service::service_fn(move |req| {
-                dav_server.handle(req, remote_addr)
-            })
+            hyper::service::service_fn(move |req| dav_server.handle(req, remote_addr))
         });
         println!("Listening on http://{:?}", sockaddr);
         let server = hyper::Server::from_tcp(listener)?
@@ -548,4 +595,3 @@ fn make_listener(addr: &SocketAddr) -> io::Result<std::net::TcpListener> {
     s.bind(addr)?;
     s.listen(128)
 }
-

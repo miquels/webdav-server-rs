@@ -14,18 +14,18 @@ mod setuid {
     // import the 32-bit variant.
     #[cfg(target_arch = "x86")]
     mod uid32 {
-        pub use libc::SYS_setresuid32 as SYS_setresuid;
         pub use libc::SYS_setregid32 as SYS_setregid;
+        pub use libc::SYS_setresuid32 as SYS_setresuid;
     }
     #[cfg(not(target_arch = "x86"))]
     mod uid32 {
-        pub use libc::{SYS_setresuid, SYS_setregid};
+        pub use libc::{SYS_setregid, SYS_setresuid};
     }
-    use libc::{uid_t, gid_t};
     use self::uid32::*;
+    use super::{drop_aux_groups, last_os_error, DROP_AUX_GROUPS};
+    use libc::{gid_t, uid_t};
     use std::cell::RefCell;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use super::{DROP_AUX_GROUPS, drop_aux_groups, last_os_error};
     const ID_NONE: uid_t = 0xffffffff;
 
     static THREAD_SWITCH_UGID_USED: AtomicUsize = AtomicUsize::new(0);
@@ -51,21 +51,21 @@ mod setuid {
         }
     }
 
-    // we remember the state of 
+    // we remember the state of
     struct UgidState {
-        ruid:   u32,
-        euid:   u32,
-        rgid:   u32,
-        egid:   u32,
+        ruid: u32,
+        euid: u32,
+        rgid: u32,
+        egid: u32,
     }
     impl UgidState {
         fn new() -> UgidState {
             THREAD_SWITCH_UGID_USED.store(1, Ordering::SeqCst);
-            UgidState{
-                ruid:   unsafe { libc::getuid() } as u32,
-                euid:   unsafe { libc::geteuid() } as u32,
-                rgid:   unsafe { libc::getgid() } as u32,
-                egid:   unsafe { libc::getegid() } as u32,
+            UgidState {
+                ruid: unsafe { libc::getuid() } as u32,
+                euid: unsafe { libc::geteuid() } as u32,
+                rgid: unsafe { libc::getgid() } as u32,
+                egid: unsafe { libc::getegid() } as u32,
             }
         }
     }
@@ -74,7 +74,6 @@ mod setuid {
     /// Switch thread credentials.
     pub fn thread_switch_ugid(newuid: u32, newgid: u32) -> (u32, u32) {
         CURRENT_UGID.with(|current_ugid| {
-
             // Only switch if we need to.
             let cur = current_ugid.borrow();
             let (olduid, oldgid) = (cur.euid, cur.egid);
@@ -89,18 +88,33 @@ mod setuid {
                     if newgid != cur.egid {
                         // Change gid.
                         if libc::syscall(SYS_setregid, cur.egid as gid_t, newgid as gid_t) != 0 {
-                            panic!("syscall(SYS_setregid, {}, {}): {:?}", cur.egid, newgid, last_os_error());
+                            panic!(
+                                "syscall(SYS_setregid, {}, {}): {:?}",
+                                cur.egid,
+                                newgid,
+                                last_os_error()
+                            );
                         }
                     }
                     if newuid != cur.euid {
                         // Change uid.
                         if libc::syscall(SYS_setresuid, cur.euid as uid_t, newuid as uid_t, 0) != 0 {
-                            panic!("syscall(SYS_setreuid, {}, {}, 0): {:?}", cur.euid, newuid, last_os_error());
+                            panic!(
+                                "syscall(SYS_setreuid, {}, {}, 0): {:?}",
+                                cur.euid,
+                                newuid,
+                                last_os_error()
+                            );
                         }
                     }
                 }
                 // save the new state.
-                let new_ugid = UgidState{ ruid: cur.euid, euid: newuid, rgid: cur.egid, egid: newgid };
+                let new_ugid = UgidState {
+                    ruid: cur.euid,
+                    euid: newuid,
+                    rgid: cur.egid,
+                    egid: newgid,
+                };
                 drop(cur);
                 *current_ugid.borrow_mut() = new_ugid;
             }
@@ -111,8 +125,8 @@ mod setuid {
 
 #[cfg(not(target_os = "linux"))]
 mod setuid {
-    use libc::{syscall, setreuid, setgid, uid_t, gid_t};
-    use super::{DROP_AUX_GROUPS, drop_aux_groups, last_os_error};
+    use super::{drop_aux_groups, last_os_error, DROP_AUX_GROUPS};
+    use libc::{gid_t, setgid, setreuid, syscall, uid_t};
     const ID_NONE: uid_t = 0xffffffff;
 
     /// Switch process credentials.
@@ -146,24 +160,25 @@ mod setuid {
 
 pub use self::setuid::{switch_ugid, thread_switch_ugid};
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct UgidSwitch {
-    target_ugid:    Option<(u32, u32)>,
+    target_ugid: Option<(u32, u32)>,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct UgidSwitchGuard {
-    base_ugid:      Option<(u32, u32)>,
+    base_ugid: Option<(u32, u32)>,
 }
 
 impl UgidSwitch {
     pub fn new(target_ugid: Option<(u32, u32)>) -> UgidSwitch {
-        UgidSwitch{ target_ugid: target_ugid }
+        UgidSwitch {
+            target_ugid: target_ugid,
+        }
     }
 
     pub fn run<F, R>(&self, func: F) -> R
-        where F: FnOnce() -> R
-    {
+    where F: FnOnce() -> R {
         if let Some(u) = self.target_ugid.as_ref() {
             let (base_uid, base_gid) = thread_switch_ugid(u.0, u.1);
             let r = func();
@@ -176,13 +191,13 @@ impl UgidSwitch {
 
     pub fn guard(&self) -> UgidSwitchGuard {
         match self.target_ugid {
-            None => UgidSwitchGuard{ base_ugid: None },
+            None => UgidSwitchGuard { base_ugid: None },
             Some((target_uid, target_gid)) => {
                 let (base_uid, base_gid) = thread_switch_ugid(target_uid, target_gid);
                 UgidSwitchGuard {
-                    base_ugid:      Some((base_uid, base_gid)),
+                    base_ugid: Some((base_uid, base_gid)),
                 }
-            }
+            },
         }
     }
 }
@@ -222,4 +237,3 @@ fn drop_aux_groups() {
         }
     }
 }
-

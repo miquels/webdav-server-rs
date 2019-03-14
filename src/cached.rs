@@ -14,14 +14,14 @@ use crate::unixuser::{self, User};
 use pam_sandboxed::{PamAuth, PamError};
 
 struct Timeouts {
-    pwcache:    Duration,
-    pamcache:   Duration,
+    pwcache:  Duration,
+    pamcache: Duration,
 }
 
 lazy_static! {
-    static ref TIMEOUTS: Mutex<Timeouts> = Mutex::new(Timeouts{
-        pwcache:    Duration::new(120, 0),
-        pamcache:   Duration::new(120, 0),
+    static ref TIMEOUTS: Mutex<Timeouts> = Mutex::new(Timeouts {
+        pwcache:  Duration::new(120, 0),
+        pamcache: Duration::new(120, 0),
     });
     static ref PWCACHE: cache::Cache<String, unixuser::User> = new_pwcache();
     static ref PAMCACHE: cache::Cache<u64, String> = new_pamcache();
@@ -47,8 +47,13 @@ pub(crate) fn set_pamcache_timeout(secs: usize) {
     timeouts.pamcache = Duration::new(secs as u64, 0);
 }
 
-pub async fn pam_auth<'a>(pam_auth: PamAuth, service: &'a str, user: &'a str, pass: &'a str, remip: Option<&'a str>)
-    -> Result<(), PamError>
+pub async fn pam_auth<'a>(
+    pam_auth: PamAuth,
+    service: &'a str,
+    user: &'a str,
+    pass: &'a str,
+    remip: Option<&'a str>,
+) -> Result<(), PamError>
 {
     let mut s = DefaultHasher::new();
     service.hash(&mut s);
@@ -59,7 +64,7 @@ pub async fn pam_auth<'a>(pam_auth: PamAuth, service: &'a str, user: &'a str, pa
 
     if let Some(cache_user) = PAMCACHE.get(&key) {
         if user == cache_user.as_str() {
-            return Ok(())
+            return Ok(());
         }
     }
 
@@ -73,8 +78,7 @@ pub async fn pam_auth<'a>(pam_auth: PamAuth, service: &'a str, user: &'a str, pa
     }
 }
 
-pub async fn unixuser(username: & str) -> Result<Arc<User>, io::Error>
-{
+pub async fn unixuser(username: &str) -> Result<Arc<User>, io::Error> {
     if let Some(pwd) = PWCACHE.get(username) {
         return Ok(pwd);
     }
@@ -83,4 +87,3 @@ pub async fn unixuser(username: & str) -> Result<Arc<User>, io::Error>
         Ok(pwd) => Ok(PWCACHE.insert(username.to_owned(), pwd)),
     }
 }
-

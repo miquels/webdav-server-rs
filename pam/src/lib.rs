@@ -15,8 +15,10 @@
 //!     .then(|res| println!("pam auth result: {}", res));
 //! fut.wait();
 //! ```
-#[macro_use] extern crate log;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate serde_derive;
 
 mod pam;
 mod pamclient;
@@ -35,4 +37,3 @@ pub fn test_mode(enabled: bool) {
     let getal = if enabled { 1 } else { 0 };
     TEST_MODE.store(getal, Ordering::SeqCst);
 }
-

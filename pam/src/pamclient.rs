@@ -11,34 +11,34 @@ use futures::prelude::*;
 use futures::sync::{mpsc, oneshot};
 use futures::try_ready;
 
-use tokio_uds::UnixStream;
 use tokio_io::{self, AsyncRead};
 use tokio_reactor;
+use tokio_uds::UnixStream;
 
-use crate::pam::{ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER, PamError};
-use crate::stream_channel;
+use crate::pam::{PamError, ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER};
 use crate::pamserver::{PamResponse, PamServer};
+use crate::stream_channel;
 
 // Request to be sent to the server process.
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PamRequest {
-    pub id:         u64,
-    pub user:       String,
-    pub pass:       String,
-    pub service:    String,
-    pub remip:      Option<String>,
+    pub id:      u64,
+    pub user:    String,
+    pub pass:    String,
+    pub service: String,
+    pub remip:   Option<String>,
 }
 
 // sent over request channel to PamAuthTask.
 struct PamRequest1 {
-    req:        PamRequest,
-    resp_chan:  oneshot::Sender<Result<(), PamError>>,
+    req:       PamRequest,
+    resp_chan: oneshot::Sender<Result<(), PamError>>,
 }
 
 /// Pam authenticator.
 #[derive(Clone)]
 pub struct PamAuth {
-    req_chan:   mpsc::Sender<PamRequest1>,
+    req_chan: mpsc::Sender<PamRequest1>,
 }
 
 impl PamAuth {
@@ -73,26 +73,31 @@ impl PamAuth {
     /// - username: account username
     /// - password: account password
     /// - remoteip: if this is a networking service, the remote IP address of the client.
-    pub fn auth(&mut self, service: &str, username: &str, password: &str, remoteip: Option<&str>)
-    -> PamAuthFuture
+    pub fn auth(
+        &mut self,
+        service: &str,
+        username: &str,
+        password: &str,
+        remoteip: Option<&str>,
+    ) -> PamAuthFuture
     {
         // create request to be sent to the server.
         let req = PamRequest {
-            id:         0,
-            user:       username.to_string(),
-            pass:       password.to_string(),
-            service:    service.to_string(),
-            remip:      remoteip.map(|s| s.to_string()),
+            id:      0,
+            user:    username.to_string(),
+            pass:    password.to_string(),
+            service: service.to_string(),
+            remip:   remoteip.map(|s| s.to_string()),
         };
         let (tx, rx) = oneshot::channel::<Result<(), PamError>>();
         let req1 = PamRequest1 {
-            req:        req,
-            resp_chan:  tx,
+            req:       req,
+            resp_chan: tx,
         };
 
         PamAuthFuture {
-            state:      PamAuthState::Request(self.req_chan.clone().send(req1)),
-            resp_rx:    Some(rx),
+            state:   PamAuthState::Request(self.req_chan.clone().send(req1)),
+            resp_rx: Some(rx),
         }
     }
 }
@@ -103,8 +108,8 @@ enum PamAuthState {
 }
 
 pub struct PamAuthFuture {
-    state:      PamAuthState,
-    resp_rx:    Option<oneshot::Receiver<Result<(), PamError>>>,
+    state:   PamAuthState,
+    resp_rx: Option<oneshot::Receiver<Result<(), PamError>>>,
 }
 
 impl Future for PamAuthFuture {
@@ -112,7 +117,6 @@ impl Future for PamAuthFuture {
     type Error = PamError;
 
     fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-
         // wait for send to complete.
         if let PamAuthState::Request(ref mut r) = self.state {
             let _ = try_ready!(r.poll().map_err(|_e| {
@@ -151,26 +155,24 @@ enum FwdState<T> {
 // Future that runs as a task, coordinating things.
 pub struct PamAuthTask {
     // Requests from clients.
-    req_rx:     mpsc::Receiver<PamRequest1>,
+    req_rx: mpsc::Receiver<PamRequest1>,
     // Requests to server
-    srv_tx:     stream_channel::Sender<PamRequest>,
+    srv_tx: stream_channel::Sender<PamRequest>,
     // Response from server.
-    srv_rx:     stream_channel::Receiver<PamResponse>,
+    srv_rx: stream_channel::Receiver<PamResponse>,
     // client request -> server request forwarding state
-    req_state:  FwdState<PamRequest>,
+    req_state: FwdState<PamRequest>,
     // server response state.
-    srv_state:  FwdState<PamResponse>,
+    srv_state: FwdState<PamResponse>,
     // clients waiting for a response.
-    waiters:    HashMap<u64, oneshot::Sender<Result<(), PamError>>>,
+    waiters: HashMap<u64, oneshot::Sender<Result<(), PamError>>>,
     // Unique id.
-    id_seq:     u64,
+    id_seq: u64,
 }
 
 impl PamAuthTask {
-
     // Start the server process. Then return a handle to send requests on.
     fn start(num_threads: Option<usize>) -> Result<(PamAuth, PamAuthTask), io::Error> {
-
         // spawn the server process.
         let serversock = PamServer::start(num_threads)?;
 
@@ -188,26 +190,31 @@ impl PamAuthTask {
 
         // create a future that processes the request channel and the server stream.
         let task = PamAuthTask {
-            req_rx:     req_rx,
-            srv_tx:     server_tx,
-            srv_rx:     server_rx,
-            req_state:  FwdState::ReadChan,
-            srv_state:  FwdState::ReadChan,
-            waiters:    HashMap::new(),
-            id_seq:     0,
+            req_rx:    req_rx,
+            srv_tx:    server_tx,
+            srv_rx:    server_rx,
+            req_state: FwdState::ReadChan,
+            srv_state: FwdState::ReadChan,
+            waiters:   HashMap::new(),
+            id_seq:    0,
         };
 
-        Ok((PamAuth{ req_chan: req_tx }, task))
+        Ok((PamAuth { req_chan: req_tx }, task))
     }
 }
 
 // Forward stream `R` to sink `S`. The transform function F() transforms the
 // data read from R, type RI, to data to be sent to S, type SI.
-fn forward<R, S, RI, SI, F>(mut recv: R, mut send: S, state: FwdState<SI>, mut transform: F)
-    -> Result<FwdState<SI>, io::Error>
-    where R: Stream<Item=RI, Error=()>,
-          S: Sink<SinkItem=SI, SinkError=io::Error>,
-          F: FnMut(RI) -> SI,
+fn forward<R, S, RI, SI, F>(
+    mut recv: R,
+    mut send: S,
+    state: FwdState<SI>,
+    mut transform: F,
+) -> Result<FwdState<SI>, io::Error>
+where
+    R: Stream<Item = RI, Error = ()>,
+    S: Sink<SinkItem = SI, SinkError = io::Error>,
+    F: FnMut(RI) -> SI,
 {
     let mut state = state;
 
@@ -264,7 +271,6 @@ impl Future for PamAuthTask {
     type Error = io::Error;
 
     fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-
         // read from request channel, transform and formward request onto server channel.
         match mem::replace(&mut self.req_state, FwdState::Eof) {
             FwdState::Eof => {},
@@ -272,7 +278,7 @@ impl Future for PamAuthTask {
                 let id_seq = &mut self.id_seq;
                 let waiters = &mut self.waiters;
                 let fwd_result = forward(&mut self.req_rx, &mut self.srv_tx, state, |item| {
-                    let PamRequest1{ mut req, resp_chan } = item;
+                    let PamRequest1 { mut req, resp_chan } = item;
                     *id_seq += 1;
                     req.id = *id_seq;
                     waiters.insert(req.id, resp_chan);
@@ -297,25 +303,24 @@ impl Future for PamAuthTask {
         }
 
         // read from server channel, return response to requestor.
-        if let FwdState::Eof = self.srv_state {} else {
+        if let FwdState::Eof = self.srv_state {
+        } else {
             let mut again = true;
             while again {
                 again = false;
                 self.srv_state = match self.srv_rx.poll() {
-                    Ok(Async::Ready(Some(PamResponse{id, result}))) => {
+                    Ok(Async::Ready(Some(PamResponse { id, result }))) => {
                         if let Some(resp_chan) = self.waiters.remove(&id) {
                             resp_chan.send(result).ok();
                         }
                         again = true;
                         FwdState::ReadChan
-                    }
+                    },
                     Ok(Async::Ready(None)) => {
                         trace!("PamAuthTask: read eof from server");
                         FwdState::Eof
                     },
-                    Ok(Async::NotReady) => {
-                        FwdState::ReadChan
-                    },
+                    Ok(Async::NotReady) => FwdState::ReadChan,
                     Err(e) => {
                         return Err(e);
                     },
@@ -332,4 +337,3 @@ impl Future for PamAuthTask {
         Ok(Async::NotReady)
     }
 }
-

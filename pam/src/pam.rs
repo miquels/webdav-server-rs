@@ -1,18 +1,23 @@
-use std::ffi::{CStr,CString};
 use std::error::Error;
-use std::os::raw::{c_char,c_int,c_void};
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_int, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-extern {
-    fn c_pam_auth(service: *const c_char, user: *const c_char, pass: *const c_char, remip: *const c_char) -> c_int;
+extern "C" {
+    fn c_pam_auth(
+        service: *const c_char,
+        user: *const c_char,
+        pass: *const c_char,
+        remip: *const c_char,
+    ) -> c_int;
     fn _c_pam_return_value(index: c_int) -> c_int;
     fn pam_strerror(pamh: *const c_void, errnum: c_int) -> *const c_char;
     fn c_pam_lower_rlimits();
 }
 
-pub(crate) const ERR_NUL_BYTE : i32 = 414243;
-pub(crate) const ERR_SEND_TO_SERVER : i32 = 414244;
-pub(crate) const ERR_RECV_FROM_SERVER : i32 = 414245;
+pub(crate) const ERR_NUL_BYTE: i32 = 414243;
+pub(crate) const ERR_SEND_TO_SERVER: i32 = 414244;
+pub(crate) const ERR_RECV_FROM_SERVER: i32 = 414245;
 
 pub(crate) static TEST_MODE: AtomicUsize = AtomicUsize::new(0);
 
@@ -20,7 +25,7 @@ pub(crate) static TEST_MODE: AtomicUsize = AtomicUsize::new(0);
 ///
 /// It's best not to try to interpret this, and handle all errors
 /// as "authentication failed".
-#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PamError(pub(crate) i32);
 
 impl PamError {
@@ -33,21 +38,13 @@ impl PamError {
 impl std::fmt::Display for PamError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self.0 {
-            ERR_NUL_BYTE => {
-                write!(f, "embedded 0 byte in string")
-            },
-            ERR_SEND_TO_SERVER => {
-                write!(f, "error sending request to server")
-            },
-            ERR_RECV_FROM_SERVER => {
-                write!(f, "error receiving response from server")
-            },
+            ERR_NUL_BYTE => write!(f, "embedded 0 byte in string"),
+            ERR_SEND_TO_SERVER => write!(f, "error sending request to server"),
+            ERR_RECV_FROM_SERVER => write!(f, "error receiving response from server"),
             _ => {
                 let errnum = self.0 as c_int;
-                let nullptr : *const c_void = std::ptr::null();
-                let errstr = unsafe {
-                    CStr::from_ptr(pam_strerror(nullptr, errnum)).to_string_lossy()
-                };
+                let nullptr: *const c_void = std::ptr::null();
+                let errstr = unsafe { CStr::from_ptr(pam_strerror(nullptr, errnum)).to_string_lossy() };
                 f.write_str(&format!("PAM error: {}", errstr))
             },
         }
@@ -71,13 +68,8 @@ impl From<std::ffi::NulError> for PamError {
 }
 
 pub(crate) fn pam_auth(service: &str, user: &str, pass: &str, remip: &str) -> Result<(), PamError> {
-
     if TEST_MODE.load(Ordering::SeqCst) > 0 {
-        return if user == "test" {
-            Ok(())
-        } else {
-            Err(PamError(1))
-        };
+        return if user == "test" { Ok(()) } else { Err(PamError(1)) };
     }
 
     let c_service = CString::new(service)?;
@@ -85,8 +77,12 @@ pub(crate) fn pam_auth(service: &str, user: &str, pass: &str, remip: &str) -> Re
     let c_pass = CString::new(pass)?;
     let c_remip = CString::new(remip)?;
     let ret = unsafe {
-        c_pam_auth(c_service.as_ptr(), c_user.as_ptr(),
-                    c_pass.as_ptr(), c_remip.as_ptr())
+        c_pam_auth(
+            c_service.as_ptr(),
+            c_user.as_ptr(),
+            c_pass.as_ptr(),
+            c_remip.as_ptr(),
+        )
     };
     match ret {
         0 => Ok(()),
@@ -95,6 +91,7 @@ pub(crate) fn pam_auth(service: &str, user: &str, pass: &str, remip: &str) -> Re
 }
 
 pub(crate) fn pam_lower_rlimits() {
-    unsafe{ c_pam_lower_rlimits(); }
+    unsafe {
+        c_pam_lower_rlimits();
+    }
 }
-

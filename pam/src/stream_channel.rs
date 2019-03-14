@@ -27,41 +27,42 @@
 //! ```
 //!
 use std::io;
-use std::mem;
 use std::marker::PhantomData;
+use std::mem;
 
-use bincode::{serialize, deserialize};
-use serde::Serialize;
+use bincode::{deserialize, serialize};
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 
-use futures::{Async, AsyncSink, Poll, Future, Sink, Stream, try_ready};
+use futures::{try_ready, Async, AsyncSink, Future, Poll, Sink, Stream};
+use tokio_io::io::{read_exact, write_all, ReadExact, WriteAll};
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::io::{ReadExact, WriteAll, read_exact, write_all};
 
 pub(crate) struct Receiver<T> {
-    state:      ReadState,
-    phantom:    PhantomData<T>,
+    state:   ReadState,
+    phantom: PhantomData<T>,
 }
 
 enum ReadState {
-	Header(ReadExact<Box<AsyncRead + Send>, Vec<u8>>),
-	Body(ReadExact<Box<AsyncRead + Send>, Vec<u8>>),
+    Header(ReadExact<Box<AsyncRead + Send>, Vec<u8>>),
+    Body(ReadExact<Box<AsyncRead + Send>, Vec<u8>>),
 }
 
 pub(crate) fn receiver<T, A>(a: A) -> Receiver<T>
-    where T: DeserializeOwned,
-          A: AsyncRead + Send + 'static,
+where
+    T: DeserializeOwned,
+    A: AsyncRead + Send + 'static,
 {
     let mut buf = Vec::with_capacity(2);
     buf.resize(2, 0u8);
     Receiver {
-        state:      ReadState::Header(read_exact(Box::new(a), buf)),
-        phantom:    PhantomData,
+        state:   ReadState::Header(read_exact(Box::new(a), buf)),
+        phantom: PhantomData,
     }
 }
 
 impl<T> Stream for Receiver<T>
-    where T: DeserializeOwned,
+where T: DeserializeOwned
 {
     type Item = T;
     type Error = io::Error;
@@ -112,9 +113,9 @@ impl<T> Stream for Receiver<T>
 }
 
 pub(crate) struct Sender<T> {
-    state:      SendState,
-    eof_state:  EofState,
-    phantom:    PhantomData<T>,
+    state:     SendState,
+    eof_state: EofState,
+    phantom:   PhantomData<T>,
 }
 
 enum SendState {
@@ -130,37 +131,36 @@ enum EofState {
 }
 
 pub(crate) fn sender<T, A>(a: A) -> Sender<T>
-    where T: Serialize,
-          A: AsyncWrite + Send + 'static,
+where
+    T: Serialize,
+    A: AsyncWrite + Send + 'static,
 {
     Sender {
-        state:      SendState::Ready(Box::new(a)),
-        eof_state:  EofState::Open,
-        phantom:    PhantomData,
+        state:     SendState::Ready(Box::new(a)),
+        eof_state: EofState::Open,
+        phantom:   PhantomData,
     }
 }
 
 impl<T> Sink for Sender<T>
-    where T: Serialize,
+where T: Serialize
 {
     type SinkItem = T;
     type SinkError = io::Error;
 
-    fn start_send(&mut self, item: Self::SinkItem)
-      -> Result<AsyncSink<Self::SinkItem>, Self::SinkError>
-    {
+    fn start_send(&mut self, item: Self::SinkItem) -> Result<AsyncSink<Self::SinkItem>, Self::SinkError> {
         // see if we can send.
         match self.poll_complete() {
             Ok(Async::Ready(())) => {},
             _ => return Ok(AsyncSink::NotReady(item)),
         }
-        if let EofState::Open = self.eof_state {} else {
+        if let EofState::Open = self.eof_state {
+        } else {
             return Err(io::Error::new(io::ErrorKind::BrokenPipe, "connection closed"));
         }
 
         // serialize data
-        let mut data: Vec<u8> = serialize(&item)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut data: Vec<u8> = serialize(&item).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         if data.len() > 65533 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "sink-item too big"));
         }
@@ -185,7 +185,6 @@ impl<T> Sink for Sender<T>
     }
 
     fn poll_complete(&mut self) -> Result<Async<()>, Self::SinkError> {
-
         // self.close() support.
         if let EofState::Pending = self.eof_state {
             let state = mem::replace(&mut self.state, SendState::Empty);
@@ -213,7 +212,7 @@ impl<T> Sink for Sender<T>
                     Ok(Async::NotReady) => return Ok(Async::NotReady),
                     Err(e) => return Err(e),
                 }
-            }
+            },
             SendState::Empty => unreachable!(),
         };
         self.state = SendState::Ready(strm);
@@ -227,4 +226,3 @@ impl<T> Sink for Sender<T>
         self.poll_complete()
     }
 }
-

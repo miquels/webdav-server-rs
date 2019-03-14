@@ -1,5 +1,5 @@
 //
-//  Virtual Root filesystem for PROPFIND. 
+//  Virtual Root filesystem for PROPFIND.
 //
 //  Shows "/" and "/user".
 //
@@ -7,32 +7,30 @@ use std;
 use std::path::Path;
 use std::pin::Pin;
 
-use futures03::{FutureExt,Stream};
+use futures03::{FutureExt, Stream};
 
-use webdav_handler::webpath::WebPath;
 use webdav_handler::fs::*;
+use webdav_handler::webpath::WebPath;
 
 use crate::userfs::UserFs;
 
 #[derive(Clone)]
 pub struct RootFs {
-    user:       String,
-    fs:         UserFs,
+    user: String,
+    fs:   UserFs,
 }
 
 impl RootFs {
     pub fn new<P>(dir: P, user: String, ugid: Option<(u32, u32)>) -> Box<RootFs>
-        where P: AsRef<Path> + Clone,
-    {
-        Box::new(RootFs{
-            user:   user,
-            fs:     *UserFs::new(dir, ugid, false),
+    where P: AsRef<Path> + Clone {
+        Box::new(RootFs {
+            user: user,
+            fs:   *UserFs::new(dir, ugid, false),
         })
     }
 }
 
 impl DavFileSystem for RootFs {
-
     // Only allow "/" or "/user", for both return the metadata of the UserFs root.
     fn metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<DavMetaData>> {
         async move {
@@ -42,22 +40,32 @@ impl DavFileSystem for RootFs {
             }
             let path = WebPath::from_str("/", "").unwrap();
             await!(self.fs.metadata(&path))
-        }.boxed()
+        }
+            .boxed()
     }
 
     // Only return one entry: "user".
-    fn read_dir<'a>(&'a self, path: &'a WebPath, _meta: ReadDirMeta) -> FsFuture<Pin<Box<Stream<Item=Box<DavDirEntry>> + Send>>> {
-        Box::pin(async move {
-            let mut v = Vec::new();
-            if self.user != "" {
-                v.push(RootFsDirEntry{
-                    name:   self.user.clone(),
-                    meta:   await!(self.fs.metadata(path)),
+    fn read_dir<'a>(
+        &'a self,
+        path: &'a WebPath,
+        _meta: ReadDirMeta,
+    ) -> FsFuture<Pin<Box<Stream<Item = Box<DavDirEntry>> + Send>>>
+    {
+        Box::pin(
+            async move {
+                let mut v = Vec::new();
+                if self.user != "" {
+                    v.push(RootFsDirEntry {
+                        name: self.user.clone(),
+                        meta: await!(self.fs.metadata(path)),
+                    });
+                }
+                let strm = futures03::stream::iter(RootFsReadDir {
+                    iterator: v.into_iter(),
                 });
-            }
-            let strm = futures03::stream::iter(RootFsReadDir{ iterator: v.into_iter() });
-            Ok(Box::pin(strm) as Pin<Box<Stream<Item=Box<DavDirEntry>> + Send>>)
-        })
+                Ok(Box::pin(strm) as Pin<Box<Stream<Item = Box<DavDirEntry>> + Send>>)
+            },
+        )
     }
 
     // cannot open any files.
@@ -73,7 +81,7 @@ impl DavFileSystem for RootFs {
 
 #[derive(Debug)]
 struct RootFsReadDir {
-    iterator:   std::vec::IntoIter<RootFsDirEntry>
+    iterator: std::vec::IntoIter<RootFsDirEntry>,
 }
 
 impl Iterator for RootFsReadDir {
@@ -89,8 +97,8 @@ impl Iterator for RootFsReadDir {
 
 #[derive(Debug)]
 struct RootFsDirEntry {
-    meta:       FsResult<Box<DavMetaData>>,
-    name:       String,
+    meta: FsResult<Box<DavMetaData>>,
+    name: String,
 }
 
 impl DavDirEntry for RootFsDirEntry {
@@ -106,4 +114,3 @@ impl DavDirEntry for RootFsDirEntry {
         Box::pin(futures03::future::ready(Ok(true)))
     }
 }
-

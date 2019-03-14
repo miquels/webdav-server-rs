@@ -1,85 +1,85 @@
-use std::{fs, io};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::Path;
 use std::process::exit;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::{fs, io};
 
 use serde::{Deserialize, Deserializer};
 use toml;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
-    pub server:     Server,
-    pub accounts:   Accounts,
+    pub server: Server,
+    pub accounts: Accounts,
     #[serde(default)]
-    pub webdav:     Webdav,
+    pub webdav: Webdav,
     #[serde(default)]
-    pub pam:        Pam,
+    pub pam: Pam,
     #[serde(default)]
-    pub unix:       Unix,
-    pub rootfs:     Option<RootFs>,
-    pub users:      Option<Users>
+    pub unix: Unix,
+    pub rootfs: Option<RootFs>,
+    pub users: Option<Users>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Server {
-    pub listen:         OneOrManyAddr,
+    pub listen: OneOrManyAddr,
     //#[serde(deserialize_with = "deserialize_user", default)]
-    pub uid:            Option<u32>,
+    pub uid: Option<u32>,
     //#[serde(deserialize_with = "deserialize_group", default)]
-    pub gid:            Option<u32>,
+    pub gid: Option<u32>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Accounts {
     #[serde(rename = "acct-type")]
-    pub acct_type:      String,
+    pub acct_type: String,
     #[serde(rename = "auth-type")]
-    pub auth_type:      String,
+    pub auth_type: String,
     #[serde(default)]
-    pub setuid:         bool,
+    pub setuid: bool,
     #[serde(default)]
-    pub realm:          Option<String>,
+    pub realm: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct Webdav {
     #[serde(default)]
-    pub locksystem:     String,
+    pub locksystem: String,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct Pam {
-    pub service:        String,
+    pub service: String,
     #[serde(rename = "cache-timeout")]
-    pub cache_timeout:  Option<usize>,
-    pub threads:        Option<usize>,
+    pub cache_timeout: Option<usize>,
+    pub threads: Option<usize>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct Unix {
     #[serde(rename = "cache-timeout")]
-    pub cache_timeout:  Option<usize>,
+    pub cache_timeout: Option<usize>,
     #[serde(rename = "min-uid", default)]
-    pub min_uid:        Option<u32>,
+    pub min_uid: Option<u32>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct RootFs {
-    pub path:       String,
-    pub directory:  String,
-    pub index:      Option<String>,
+    pub path: String,
+    pub directory: String,
+    pub index: Option<String>,
     #[serde(default)]
-    pub auth:       bool,
+    pub auth: bool,
     #[serde(default)]
-    pub webdav:     Option<bool>,
+    pub webdav: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Users {
-    pub path:       String,
+    pub path: String,
 }
 
-#[derive(Deserialize,Debug,Clone)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum OneOrManyAddr {
     One(SocketAddr),
@@ -101,18 +101,20 @@ impl ToSocketAddrs for OneOrManyAddr {
 // usernames and groupnames.
 #[allow(unused)]
 pub fn deserialize_user<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
-        where D: Deserializer<'de> {
-
+where D: Deserializer<'de> {
     let s = String::deserialize(deserializer)?;
-    s.parse::<u32>().map(|v| Some(v)).map_err(serde::de::Error::custom)
+    s.parse::<u32>()
+        .map(|v| Some(v))
+        .map_err(serde::de::Error::custom)
 }
 
 #[allow(unused)]
 pub fn deserialize_group<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
-        where D: Deserializer<'de> {
-
+where D: Deserializer<'de> {
     let s = String::deserialize(deserializer)?;
-    s.parse::<u32>().map(|v| Some(v)).map_err(serde::de::Error::custom)
+    s.parse::<u32>()
+        .map(|v| Some(v))
+        .map_err(serde::de::Error::custom)
 }
 
 // Read the TOML config into a config::Config struct.
@@ -130,11 +132,17 @@ pub fn read(toml_file: impl AsRef<Path>) -> io::Result<Config> {
 
 pub fn check(cfg: &str, config: &Config) {
     if config.accounts.acct_type != "unix" {
-        eprintln!("{}: [accounts]: unknown acct-type: {}", cfg, config.accounts.acct_type);
+        eprintln!(
+            "{}: [accounts]: unknown acct-type: {}",
+            cfg, config.accounts.acct_type
+        );
         exit(1);
     }
     if config.accounts.auth_type != "pam" {
-        eprintln!("{}: [accounts]: unknown auth-type: {}", cfg, config.accounts.auth_type);
+        eprintln!(
+            "{}: [accounts]: unknown auth-type: {}",
+            cfg, config.accounts.auth_type
+        );
         exit(1);
     }
     if config.pam.service == "" {
@@ -142,11 +150,14 @@ pub fn check(cfg: &str, config: &Config) {
         exit(1);
     }
     match config.webdav.locksystem.as_str() {
-        ""|"none"|"fakels"|"memls" => {},
+        "" | "none" | "fakels" | "memls" => {},
         _ => {
-            eprintln!("{}: [webdav]: unknown locksystem: {}", cfg, config.webdav.locksystem);
+            eprintln!(
+                "{}: [webdav]: unknown locksystem: {}",
+                cfg, config.webdav.locksystem
+            );
             exit(1);
-        }
+        },
     }
     if config.rootfs.is_none() && config.users.is_none() {
         eprintln!("{}: must have at least one of [rootfs] or [users]", cfg);
@@ -163,4 +174,3 @@ pub fn check(cfg: &str, config: &Config) {
         }
     }
 }
-

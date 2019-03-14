@@ -1,11 +1,12 @@
-#[macro_use] extern crate error_chain;
+#[macro_use]
+extern crate error_chain;
 
 use std::io::Write;
 
 use env_logger;
 
-use futures::prelude::*;
 use futures::future;
+use futures::prelude::*;
 use tokio;
 
 use pam_sandboxed;
@@ -40,11 +41,12 @@ fn run() -> Result<()> {
                     Err(())
                 },
             }
-        }).and_then(move |mut pam| {
+        })
+        .and_then(move |mut pam| {
             tokio::spawn(
                 pam.auth("other", &name, &pass, None)
                     .map(|_res| println!("pam.auth returned Ok({:?})", _res))
-                    .map_err(|_e| println!("pam.auth returned error: {}", _e))
+                    .map_err(|_e| println!("pam.auth returned error: {}", _e)),
             )
         });
 
@@ -64,8 +66,8 @@ quick_main!(run);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pam_sandboxed::{PamAuth, PamError, test_mode};
     use futures::future::lazy;
+    use pam_sandboxed::{test_mode, PamAuth, PamError};
     use tokio;
 
     const TEST_STR: &str = "xyzzy-test-test";
@@ -74,25 +76,24 @@ mod tests {
     fn test_auth() {
         test_mode(true);
         let fut = lazy(move || {
-                let mut pam = PamAuth::new(None).unwrap();
-                let mut pam2 = pam.clone();
-                pam.auth(TEST_STR, "test", "foo", Some(TEST_STR))
-                    .map_err(|e| {
-                        eprintln!("auth(test) failed: {:?}", e);
-                        e
+            let mut pam = PamAuth::new(None).unwrap();
+            let mut pam2 = pam.clone();
+            pam.auth(TEST_STR, "test", "foo", Some(TEST_STR))
+                .map_err(|e| {
+                    eprintln!("auth(test) failed: {:?}", e);
+                    e
+                })
+                .and_then(move |_| {
+                    pam2.auth(TEST_STR, "unknown", "bar", Some(TEST_STR)).then(|res| {
+                        match res {
+                            Ok(()) => {
+                                eprintln!("auth(unknown) succeeded, should have failed");
+                                Err(PamError::unknown())
+                            },
+                            Err(_) => Ok(()),
+                        }
                     })
-                    .and_then(move |_| {
-                        pam2.auth(TEST_STR, "unknown", "bar", Some(TEST_STR))
-                            .then(|res| {
-                                match res {
-                                    Ok(()) => {
-                                        eprintln!("auth(unknown) succeeded, should have failed");
-                                        Err(PamError::unknown())
-                                    },
-                                    Err(_) => Ok(()),
-                                }
-                            })
-                    })
+                })
         });
 
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -107,7 +108,7 @@ mod tests {
             for i in 1..=1000 {
                 tokio::spawn(
                     pam.auth(TEST_STR, "test", "bar", Some(TEST_STR))
-                        .map_err(move |e| panic!("auth(test) failed at iteration {}: {:?}", i, e))
+                        .map_err(move |e| panic!("auth(test) failed at iteration {}: {:?}", i, e)),
                 );
             }
             futures::future::ok::<(), ()>(())
