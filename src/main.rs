@@ -26,6 +26,7 @@ mod suid;
 mod unixuser;
 mod userfs;
 
+use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::process::exit;
@@ -36,6 +37,7 @@ use env_logger;
 use futures::{future, Future, Stream};
 use futures03::compat::Future01CompatExt;
 use futures03::{FutureExt, TryFutureExt};
+use handlebars::Handlebars;
 use http;
 use http::status::StatusCode;
 use hyper::{self, server::conn::AddrStream, service::make_service_fn};
@@ -45,7 +47,7 @@ use tokio;
 use pam_sandboxed::PamAuth;
 use webdav_handler::typed_headers::{Authorization, Basic, HeaderMapExt};
 use webdav_handler::{fakels::FakeLs, localfs::LocalFs, ls::DavLockSystem, memls::MemLs};
-use webdav_handler::{fs::DavFileSystem, webpath::WebPath, DavConfig, DavHandler};
+use webdav_handler::{fs, fs::DavFileSystem, webpath::WebPath, DavConfig, DavHandler};
 
 use crate::rootfs::RootFs;
 use crate::suid::switch_ugid;
@@ -248,12 +250,15 @@ impl Server {
         if method == &http::Method::GET || method == &http::Method::HEAD {
             if let Some((webpath, do_auth)) = self.is_realroot(req.uri()) {
                 debug!("handle_async: {:?}: handle as realroot", req.uri());
-                if do_auth {
-                    if let Err(status) = await!(self.auth(&req, ip_ref)) {
-                        return await!(self.error(status));
+                let user = if do_auth {
+                    match await!(self.auth(&req, ip_ref)) {
+                        Ok(pwd) => Some(pwd.name.clone()),
+                        Err(status) => return await!(self.error(status)),
                     }
-                }
-                return await!(self.handle_realroot(req, body, webpath));
+                } else {
+                    None
+                };
+                return await!(self.handle_realroot(req, body, user, webpath));
             }
             debug!("handle_async: {:?}: not realroot", req.uri());
         }
@@ -341,6 +346,7 @@ impl Server {
         &self,
         req: http::Request<()>,
         body: hyper::Body,
+        user: Option<String>,
         webpath: WebPath,
     ) -> HyperResult
     {
@@ -369,16 +375,27 @@ impl Server {
         }
 
         // see if file exists.
-        let fs = LocalFs::new(&rootfs.directory, true);
+        let fs: Box<DavFileSystem> = LocalFs::new(&rootfs.directory, true);
         if await!(fs.metadata(&webpath)).is_err() {
-            // it doesn't. see if it matches a valid username.
-            match await!(cached::unixuser(&filename)) {
-                Ok(_) => {
-                    debug!("Server::handle_realroot: redirect to /{}/", filename);
-                    return await!(self.redirect("/".to_string() + &filename + "/"));
-                },
-                Err(_) => return await!(self.error(StatusCode::NOT_FOUND)),
+            if let Some(users_path) = self.users_path.as_ref() {
+                if users_path == &rootfs.path {
+                    // file doesn't exist and we share the path with the users path.
+                    // if it matches a valid username, redirect.
+                    if await!(cached::unixuser(&filename)).is_ok() {
+                        debug!("Server::handle_realroot: redirect to /{}/", filename);
+                        let mut p = WebPath::from_str(&rootfs.path, "").unwrap();
+                        p.push_segment(filename.as_bytes());
+                        p.add_slash();
+                        return await!(self.redirect(p.as_utf8_string_with_prefix()));
+                    }
+                }
             }
+            return await!(self.error(StatusCode::NOT_FOUND));
+        }
+
+        // Might be handlebars.
+        if filename.ends_with(".hbs") {
+            return await!(self.render_hbs(req, fs, webpath, user));
         }
 
         // serve.
@@ -387,6 +404,50 @@ impl Server {
             ..DavConfig::default()
         };
         await!(self.run_davhandler(req, body, config))
+    }
+
+    // handlebars support.
+    async fn render_hbs(
+        &self,
+        req: http::Request<()>,
+        mut fs: Box<DavFileSystem + 'static>,
+        webpath: WebPath,
+        user: Option<String>,
+    ) -> HyperResult
+    {
+        let filename = std::str::from_utf8(webpath.file_name()).unwrap();
+        debug!("Server::render_hbs {}", filename);
+        let indata = match await!(read_file(&mut fs, &webpath)) {
+            Ok(data) => data,
+            Err(e) => {
+                debug!("render_hbs: {}: {:?}", filename, e);
+                return await!(self.error(StatusCode::INTERNAL_SERVER_ERROR));
+            },
+        };
+        let hbs = Handlebars::new();
+        let mut vars = HashMap::new();
+        let h = req.headers()
+            .get("host")
+            .and_then(|s| s.to_str().ok())
+            .map(|s| s.to_owned());
+        if let Some(host) = h {
+            vars.insert("hostname", host.to_string());
+        }
+        if let Some(user) = user {
+            vars.insert("username", user);
+        }
+        let outdata = match hbs.render_template(&indata, &vars) {
+            Ok(data) => data,
+            Err(e) => {
+                debug!("handle_realroot: {}: render template: {:?}", filename, e);
+                return await!(self.error(StatusCode::INTERNAL_SERVER_ERROR));
+            },
+        };
+        hyper::Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html")
+            .body(outdata.into())
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
     // virtual root filesytem for PROPFIND/OPTIONS in "/".
@@ -594,4 +655,22 @@ fn make_listener(addr: &SocketAddr) -> io::Result<std::net::TcpListener> {
     s.reuse_address(true)?;
     s.bind(addr)?;
     s.listen(128)
+}
+
+async fn read_file<'a>(fs: &'a mut Box<DavFileSystem + 'static>, webpath: &'a WebPath) -> fs::FsResult<String> {
+    let oo = fs::OpenOptions{ read: true, ..fs::OpenOptions::default() };
+    let mut file = await!(fs.open(webpath, oo))?;
+    let mut buffer = [0; 8192];
+    let mut data = Vec::new();
+    loop {
+        let n = await!(file.read_bytes(&mut buffer[..]))?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..n]);
+    }
+    match String::from_utf8(data) {
+        Ok(s) => Ok(s),
+        Err(_) => Err(fs::FsError::GeneralFailure),
+    }
 }
