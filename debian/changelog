@@ -1,0 +1,6 @@
+webdav-server-rs (0.1) wheezy jessie stretch; urgency=low
+
+  * initial release
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Sun, 17 Mar 2019 23:20:52 +0100
+

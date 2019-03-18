@@ -1,0 +1,20 @@
+#! /bin/sh
+
+### BEGIN INIT INFO
+# Provides:             webdav-server
+# Required-Start:       $network
+# Required-Stop:        $network
+# Default-Start:        2 3 4 5
+# Default-Stop:         
+# Short-Description:    Webdav server
+### END INIT INFO
+
+set -e
+
+test -x /usr/sbin/webdav-server || exit 0
+
+. /lib/lsb/init-functions
+
+# If systemd is installed, we never actually get here.
+exit 1
+

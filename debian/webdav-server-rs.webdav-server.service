@@ -1,0 +1,12 @@
+[Unit]
+Description=Webdav server
+After=network.target
+ConditionPathExists=/etc/webdav-server.toml
+
+[Service]
+ExecStart=/usr/sbin/webdav-server
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+

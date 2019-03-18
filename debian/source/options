@@ -1,0 +1,5 @@
+--tar-ignore
+--tar-ignore=target
+--tar-ignore=TODO.md
+--tar-ignore=*/src/*.toml
+--tar-ignore=*test*.toml
