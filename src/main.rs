@@ -231,12 +231,13 @@ impl Server {
         // stringify the remote IP address.
         let ip = remote_ip.ip();
         let ip_string = if ip.is_loopback() {
-            // if it's loopback, take the value from the x-real-ip
+            // if it's loopback, take the value from the x-forwarded-for
             // header, if present.
             req.headers()
-                .get("x-real-ip")
+                .get("x-forwarded-for")
                 .and_then(|s| s.to_str().ok())
-                .map(|s| s.to_owned())
+		.and_then(|s| s.split(',').next())
+                .map(|s| s.trim().to_owned())
         } else {
             Some(match ip {
                 IpAddr::V4(ip) => ip.to_string(),

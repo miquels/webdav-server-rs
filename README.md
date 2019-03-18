@@ -20,8 +20,8 @@ See the [example webdav-server.toml file](webdav-server.toml)
 
 The built-in PAM client will add the client IP address to PAM requests.
 If the client IP adress is localhost (127/8 or ::1) then the content of
-the X-Real-IP header is used instead (if present) to allow for afore-mentioned
-frontend proxies.
+the X-Forwarded-For header is used instead (if present) to allow for
+aforementioned frontend proxies.
 
 ## Copyright and License.
 
