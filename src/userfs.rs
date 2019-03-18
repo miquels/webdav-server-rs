@@ -100,7 +100,7 @@ impl DavFileSystem for UserFs {
                     None => {
                         self.ugidswitch.run(move || {
                             let path = &self.basedir;
-                            let r = FsQuota::check(path)
+                            let r = FsQuota::user(self.uid, path)
                                 .or_else(|e| {
                                     if e == FqError::NoQuota {
                                         FsQuota::system(path)
