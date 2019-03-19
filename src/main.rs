@@ -625,6 +625,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
         println!("Listening on http://{:?}", sockaddr);
         let server = hyper::Server::from_tcp(listener)?
+            .tcp_nodelay(true)
             .serve(make_service)
             .map_err(|e| eprintln!("server error: {}", e));
         servers.push(server);
