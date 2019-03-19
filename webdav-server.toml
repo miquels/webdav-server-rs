@@ -84,4 +84,6 @@
   # result in a virtual directory containing 1 item, the username
   # sent by the client.
   path = "/:username"
+  # Hide symbolic links (default: true)
+  hide_symlinks = true
 

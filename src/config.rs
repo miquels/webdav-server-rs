@@ -77,6 +77,8 @@ pub struct RootFs {
 #[derive(Deserialize, Debug, Clone)]
 pub struct Users {
     pub path: String,
+    #[serde(default)]
+    pub hide_symlinks:  Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

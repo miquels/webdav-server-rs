@@ -494,7 +494,7 @@ impl Server {
     ) -> HyperResult
     {
         // do we have a users section?
-        let _users = match self.config.users {
+        let users = match self.config.users {
             Some(ref users) => users,
             None => return await!(self.error(StatusCode::NOT_FOUND)),
         };
@@ -510,6 +510,7 @@ impl Server {
             prefix: Some(prefix),
             fs: Some(fs),
             principal: Some(pwd.name.to_string()),
+            hide_symlinks: users.hide_symlinks,
             ..DavConfig::default()
         };
         await!(self.run_davhandler(req, body, config))
