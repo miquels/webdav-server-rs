@@ -27,6 +27,8 @@ pub struct Server {
     pub uid: Option<u32>,
     //#[serde(deserialize_with = "deserialize_group", default)]
     pub gid: Option<u32>,
+    #[serde(default)]
+    pub identification: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

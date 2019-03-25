@@ -220,6 +220,26 @@ impl Server {
         Ok(pwd)
     }
 
+    // return a new response::Builder with the Server: header set.
+    fn response_builder(&self) -> http::response::Builder {
+        let mut builder = hyper::Response::builder();
+        let id = self.config.server.identification
+                .as_ref().map(|s| s.as_str()).unwrap_or("webdav-server-rs");
+        if id != "" {
+            builder.header("Server", id);
+        }
+        builder
+    }
+
+    // Set Server: webdav-server-rs header.
+    fn set_server_header(&self, headers: &mut http::HeaderMap<http::header::HeaderValue>) {
+        let id = self.config.server.identification
+                .as_ref().map(|s| s.as_str()).unwrap_or("webdav-server-rs");
+        if id != "" {
+            headers.insert("server", id.parse().unwrap());
+        }
+    }
+
     // handle a request.
     async fn handle_async(
         &self,
@@ -316,7 +336,7 @@ impl Server {
             code.as_u16(),
             code.canonical_reason().unwrap_or("")
         );
-        let mut response = hyper::Response::builder();
+        let mut response = self.response_builder();
         response.status(code);
         response.header("Content-Type", "text/xml");
         if code == StatusCode::UNAUTHORIZED {
@@ -333,7 +353,7 @@ impl Server {
     }
 
     async fn redirect(&self, path: String) -> HyperResult {
-        let resp = hyper::Response::builder()
+        let resp = self.response_builder()
             .status(302)
             .header("content-type", "text/plain")
             .header("location", path)
@@ -444,7 +464,7 @@ impl Server {
                 return await!(self.error(StatusCode::INTERNAL_SERVER_ERROR));
             },
         };
-        hyper::Response::builder()
+        self.response_builder()
             .status(StatusCode::OK)
             .header("Content-Type", "text/html")
             .body(outdata.into())
@@ -529,7 +549,8 @@ impl Server {
 
         // run handler, then transform http::Response into hyper::Response.
         let resp = await!(self.dh.handle_with(config, req).compat())?;
-        let (parts, body) = resp.into_parts();
+        let (mut parts, body) = resp.into_parts();
+        self.set_server_header(&mut parts.headers);
         let body = hyper::Body::wrap_stream(body);
         Ok(hyper::Response::from_parts(parts, body))
     }
