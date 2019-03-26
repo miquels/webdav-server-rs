@@ -80,7 +80,7 @@ pub struct RootFs {
 pub struct Users {
     pub path: String,
     #[serde(default)]
-    pub hide_symlinks:  Option<bool>,
+    pub hide_symlinks: Option<bool>,
     #[serde(default)]
     pub ms_case_insensitive: bool,
 }

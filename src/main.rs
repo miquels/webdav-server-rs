@@ -223,8 +223,13 @@ impl Server {
     // return a new response::Builder with the Server: header set.
     fn response_builder(&self) -> http::response::Builder {
         let mut builder = hyper::Response::builder();
-        let id = self.config.server.identification
-                .as_ref().map(|s| s.as_str()).unwrap_or("webdav-server-rs");
+        let id = self
+            .config
+            .server
+            .identification
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or("webdav-server-rs");
         if id != "" {
             builder.header("Server", id);
         }
@@ -233,8 +238,13 @@ impl Server {
 
     // Set Server: webdav-server-rs header.
     fn set_server_header(&self, headers: &mut http::HeaderMap<http::header::HeaderValue>) {
-        let id = self.config.server.identification
-                .as_ref().map(|s| s.as_str()).unwrap_or("webdav-server-rs");
+        let id = self
+            .config
+            .server
+            .identification
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or("webdav-server-rs");
         if id != "" {
             headers.insert("server", id.parse().unwrap());
         }
@@ -256,7 +266,7 @@ impl Server {
             req.headers()
                 .get("x-forwarded-for")
                 .and_then(|s| s.to_str().ok())
-		.and_then(|s| s.split(',').next())
+                .and_then(|s| s.split(',').next())
                 .map(|s| s.trim().to_owned())
         } else {
             Some(match ip {
@@ -353,7 +363,8 @@ impl Server {
     }
 
     async fn redirect(&self, path: String) -> HyperResult {
-        let resp = self.response_builder()
+        let resp = self
+            .response_builder()
             .status(302)
             .header("content-type", "text/plain")
             .header("location", path)
@@ -447,7 +458,8 @@ impl Server {
         };
         let hbs = Handlebars::new();
         let mut vars = HashMap::new();
-        let h = req.headers()
+        let h = req
+            .headers()
             .get("host")
             .and_then(|s| s.to_str().ok())
             .map(|s| s.to_owned());
@@ -690,8 +702,15 @@ fn make_listener(addr: &SocketAddr) -> io::Result<std::net::TcpListener> {
     s.listen(128)
 }
 
-async fn read_file<'a>(fs: &'a mut Box<DavFileSystem + 'static>, webpath: &'a WebPath) -> fs::FsResult<String> {
-    let oo = fs::OpenOptions{ read: true, ..fs::OpenOptions::default() };
+async fn read_file<'a>(
+    fs: &'a mut Box<DavFileSystem + 'static>,
+    webpath: &'a WebPath,
+) -> fs::FsResult<String>
+{
+    let oo = fs::OpenOptions {
+        read: true,
+        ..fs::OpenOptions::default()
+    };
     let mut file = await!(fs.open(webpath, oo))?;
     let mut buffer = [0; 8192];
     let mut data = Vec::new();
