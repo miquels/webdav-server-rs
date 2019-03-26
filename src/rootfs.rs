@@ -25,7 +25,7 @@ impl RootFs {
     where P: AsRef<Path> + Clone {
         Box::new(RootFs {
             user: user,
-            fs:   *UserFs::new(dir, ugid, false),
+            fs:   *UserFs::new(dir, ugid, false, false),
         })
     }
 }

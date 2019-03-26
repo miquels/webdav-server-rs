@@ -18,14 +18,14 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct UserFs {
-    fs:         LocalFs,
+    pub fs:     LocalFs,
     basedir:    PathBuf,
     ugidswitch: UgidSwitch,
     uid:        u32,
 }
 
 impl UserFs {
-    pub fn new(dir: impl AsRef<Path>, target_ugid: Option<(u32, u32)>, public: bool) -> Box<UserFs> {
+    pub fn new(dir: impl AsRef<Path>, target_ugid: Option<(u32, u32)>, public: bool, case_insensitive: bool) -> Box<UserFs> {
         // uid is used for quota() calls.
         let uid = target_ugid.as_ref().map(|ugid| ugid.0).unwrap_or(0);
 
@@ -38,7 +38,7 @@ impl UserFs {
 
         Box::new(UserFs {
             basedir:    dir.as_ref().to_path_buf(),
-            fs:         *LocalFs::new_with_fs_access_guard(dir, public, Some(blocking_guard)),
+            fs:         *LocalFs::new_with_fs_access_guard(dir, public, case_insensitive, Some(blocking_guard)),
             ugidswitch: switch,
             uid:        uid,
         })

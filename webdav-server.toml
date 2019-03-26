@@ -88,4 +88,9 @@
   path = "/:username"
   # Hide symbolic links (default: true)
   hide_symlinks = true
+  # If this is set *and* the User-Agent header contains "Microsoft",
+  # filesystem lookup will be case insensitive. Note that this has
+  # a *lot* of overhead (potentially a readdir on every segment
+  # of the path!) (default: false).
+  ms_case_insensitive = false
 
