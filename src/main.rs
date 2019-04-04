@@ -407,7 +407,7 @@ impl Server {
         }
 
         // see if file exists.
-        let fs: Box<DavFileSystem> = LocalFs::new(&rootfs.directory, true, false);
+        let fs: Box<DavFileSystem> = LocalFs::new(&rootfs.directory, true, false, false);
         if await!(fs.metadata(&webpath)).is_err() {
             if let Some(users_path) = self.users_path.as_ref() {
                 if users_path == &rootfs.path {
@@ -535,16 +535,15 @@ impl Server {
             true => Some((pwd.uid, pwd.gid)),
             false => None,
         };
-        let case_insensitive = if users.ms_case_insensitive {
-            req.headers()
-                .get("user-agent")
-                .and_then(|s| s.to_str().ok())
-                .map(|s| s.contains("Microsoft"))
-                .unwrap_or(false)
-        } else {
-            false
-        };
-        let fs = UserFs::new(&pwd.dir, ugid, true, case_insensitive);
+
+        let user_agent = req.headers()
+            .get("user-agent")
+            .and_then(|s| s.to_str().ok())
+            .unwrap_or("");
+        let case_insensitive = users.ms_case_insensitive && user_agent.contains("Microsoft");
+        let macos = user_agent.contains("WebDAVFS/") && user_agent.contains("Darwin");
+
+        let fs = UserFs::new(&pwd.dir, ugid, true, case_insensitive, macos);
 
         debug!("Server::handle_user: in userdir {} prefix {} ", pwd.name, prefix);
         let config = DavConfig {

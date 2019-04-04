@@ -30,6 +30,7 @@ impl UserFs {
         target_ugid: Option<(u32, u32)>,
         public: bool,
         case_insensitive: bool,
+        macos: bool,
     ) -> Box<UserFs>
     {
         // uid is used for quota() calls.
@@ -48,6 +49,7 @@ impl UserFs {
                 dir,
                 public,
                 case_insensitive,
+                macos,
                 Some(blocking_guard),
             ),
             ugidswitch: switch,
