@@ -1,18 +1,19 @@
 
 ## TODO list
 
-- configuration file
-- systemd unit file
-- configure path/prefix for accounts
+- define list of "public dirs" where files/dirs are created 644/755,
+  and 600/700 everywhere else?
 - blacklist accounts?
-- files in WWW mode 644/755
-- GET in / -- if file exists, do not authenticate. index support.
 - document the PAM webdav config
-- document the nginx config
-
-- rootfs: add serving files for GET
-- parse index.tmpl file
+- document nginx front-proxy config
 
 # DONE:
 
 - GET on directory -> directory listing
+- configuration file
+- systemd unit file
+- configure path/prefix for accounts
+- GET in / -- if file exists, do not authenticate. index support.
+- rootfs: add serving files for GET
+- parse index.tmpl file
+
