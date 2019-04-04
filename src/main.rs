@@ -536,7 +536,8 @@ impl Server {
             false => None,
         };
 
-        let user_agent = req.headers()
+        let user_agent = req
+            .headers()
             .get("user-agent")
             .and_then(|s| s.to_str().ok())
             .unwrap_or("");
