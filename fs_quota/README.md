@@ -1,16 +1,30 @@
 # FS-QUOTA
 
-A library that reports how much space is left for a user in a certain
-directory.
+Get filesystem disk space used and available for a unix user.
 
-If quotas are enabled for the user, that information will be queried
-first. The library has support for:
+This crate has support for:
 
 - Linux ext2/ext3/ext4 quotas
 - Linux XFS quotas
 - NFS quotas (via SUNRPC).
+- `libc::vfsstat` lookups (like `df`).
 
-If no quota is found, the `statvfs` system call will be used.
+NOTE: right now this is all only implemented for **Linux**.
+
+Example application:
+
+```rust
+use fs_quota::*;
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        println!("usage: fs_quota <path>");
+        return;
+    }
+    println!("{:#?}", FsQuota::check(&args[1], None));
+}
+```
 
 ## Copyright and License.
 

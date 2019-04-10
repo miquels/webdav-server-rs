@@ -1,3 +1,27 @@
+//! Get filesystem disk space used and available for a unix user.
+//!
+//! This crate has support for:
+//!
+//! - Linux ext2/ext3/ext4 quotas
+//! - Linux XFS quotas
+//! - NFS quotas (via SUNRPC).
+//! - `libc::vfsstat` lookups (like `df`).
+//!
+//! NOTE: right now this is all only implemented for **Linux**.
+//!
+//! Example application:
+//! ```no_run
+//! use fs_quota::*;
+//!
+//! fn main() {
+//!     let args: Vec<String> = std::env::args().collect();
+//!     if args.len() < 2 {
+//!         println!("usage: fs_quota <path>");
+//!         return;
+//!     }
+//!     println!("{:#?}", FsQuota::check(&args[1], None));
+//! }
+//! ```
 #[macro_use]
 extern crate log;
 extern crate libc;
@@ -13,19 +37,29 @@ use std::os::raw::{c_char, c_int};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
+/// quota / vfsstat lookup result.
 #[derive(Debug)]
 pub struct FsQuota {
+    /// number of bytes used.
     pub bytes_used:  u64,
+    /// maximum number of bytes (available - used).
     pub bytes_limit: Option<u64>,
+    /// number of files (inodes) in use.
     pub files_used:  u64,
+    /// maximum number of files (available - used).
     pub files_limit: Option<u64>,
 }
 
+/// Error result.
 #[derive(Debug)]
 pub enum FqError {
+    /// Permission denied.
     PermissionDenied,
+    /// Filesystem does not have quotas enabled.
     NoQuota,
+    /// An I/O error occured.
     IoError(io::Error),
+    /// Some other error.
     Other,
 }
 
@@ -187,19 +221,12 @@ fn fstype(tp: &str) -> FsType {
     }
 }
 
-// helper
-fn u32_to_c_int(u: u32) -> c_int {
-    let mut tmp: i64 = u as i64;
-    if tmp >= 0x80000000 {
-        tmp -= 0x100000000;
-    }
-    tmp as c_int
-}
-
 impl FsQuota {
-    /// Get the used and available space for a specific user.
-    pub fn user<P: AsRef<Path>>(uid: u32, path: P) -> Result<FsQuota, FqError> {
-        let id = u32_to_c_int(uid);
+    /// Get the filesystem quota for a `uid` on the filesystem where `path` is on.
+    ///
+    /// If `uid` is `None`, get it for the current real user-id.
+    pub fn user(path: impl AsRef<Path>, uid: Option<u32>) -> Result<FsQuota, FqError> {
+        let id = uid.unwrap_or(unsafe { ffi::getuid() }) as c_int;
         let path = path.as_ref();
         let meta = std::fs::symlink_metadata(path)?;
 
@@ -359,20 +386,10 @@ impl FsQuota {
         return Ok(res);
     }
 
-    /// Get used and available space for the user-id of the caller.
-    pub fn check<P: AsRef<Path>>(path: P) -> Result<FsQuota, FqError> {
-        let uid = unsafe { ffi::getuid() };
-        FsQuota::user(uid, path)
-    }
-
-    /// Get used and available space systemwide. Usually one first tries
-    /// to get the user-specific quota. If there isn't any then
-    /// report the system-wide disk usage.
+    /// Get used and available disk space of the filesystem indicated by `path`.
     ///
-    /// FsQuota::check(path)
-    ///     .or_else(|e| if e == FqError::NoQuota { FsQuota::system(path) } else { Err(e) })
-    ///
-    pub fn system<P: AsRef<Path>>(path: P) -> Result<FsQuota, FqError> {
+    /// This is not really a quota call; it simply calls `libc::vfsstat` (`df`).
+    pub fn system(path: impl AsRef<Path>) -> Result<FsQuota, FqError> {
         let vfs = statvfs(path).map_err(|e| FqError::IoError(e))?;
         Ok(FsQuota {
             bytes_used:  ((vfs.f_blocks - vfs.f_bfree) * vfs.f_bsize) as u64,
@@ -381,6 +398,27 @@ impl FsQuota {
             files_limit: Some((vfs.f_files - (vfs.f_ffree - vfs.f_favail)) as u64),
         })
     }
+
+    /// Lookup used and available disk space for a `uid`. First check user's quota,
+    /// if quotas are not enabled check the filesystem disk space usage.
+    ///
+    /// This is the equivalent of
+    ///
+    /// ```no_run
+    /// # let path = "/";
+    /// # let uid = None;
+    /// # use fs_quota::*;
+    /// FsQuota::user(path, uid)
+    ///     .or_else(|e| if e == FqError::NoQuota { FsQuota::system(path) } else { Err(e) })
+    /// # ;
+    /// ```
+    ///
+    pub fn check(path: impl AsRef<Path>, uid: Option<u32>) -> Result<FsQuota, FqError> {
+        let path = path.as_ref();
+        FsQuota::user(path, uid)
+            .or_else(|e| if e == FqError::NoQuota { FsQuota::system(path) } else { Err(e) })
+    }
+
 }
 
 impl From<io::Error> for FqError {
