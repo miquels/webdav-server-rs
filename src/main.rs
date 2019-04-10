@@ -3,9 +3,10 @@
 //! This is a webdav server that allows access to a users home directory,
 //! just like an ancient FTP server would (remember those?).
 //!
-//! Right now, this server does not implement TLS or logging. The general idea
-//! is that most people put a reverse-proxy in front of services like this
-//! anyway, like NGINX, that can do TLS and logging.
+//! This is an application. There is no API documentation here.
+//! If you want to build your _own_ webdav server, use the `webdav-handler` crate.
+//!
+//! See the GitHub repository for documentation on how to run the server.
 //!
 #![feature(async_await, await_macro, futures_api)]
 
@@ -55,7 +56,7 @@ use crate::userfs::UserFs;
 
 static PROGNAME: &'static str = "webdav-server";
 
-pub type BoxedByteStream = Box<futures::Stream<Item = Bytes, Error = io::Error> + Send + 'static>;
+pub(crate) type BoxedByteStream = Box<futures::Stream<Item = Bytes, Error = io::Error> + Send + 'static>;
 
 // Contains "state" and a handle to the config.
 #[derive(Clone)]
