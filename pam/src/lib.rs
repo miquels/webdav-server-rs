@@ -9,12 +9,17 @@
 //!
 //! Use it as follows:
 //! ```no_run
+//! # use futures::Future;
+//! # use pam_sandboxed::*;
 //! // call this once.
-//! let pam = PamAuth::new();
+//! let mut pam = PamAuth::new(None).expect("failed to initialized PAM");
 //!
 //! // now use `pam` as a handle to authenticate.
 //! let fut = pam.auth("other", "user", "pass", None)
-//!     .then(|res| println!("pam auth result: {}", res));
+//!     .then(|res| {
+//!         println!("pam auth result: {:?}", res);
+//!         res
+//!     });
 //! tokio::spawn(fut.map_err(|_| ()));
 //! ```
 #[macro_use]

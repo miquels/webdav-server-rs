@@ -66,10 +66,23 @@ impl PamAuth {
     ///
     /// Example:
     /// ```no_run
+    /// # #[macro_use] extern crate log;
+    /// # use futures::Future;
+    /// # use pam_sandboxed::*;
+    /// # fn example() -> Result<(), Box<std::error::Error>> {
     /// // get pam authentication handle.
-    /// let (pam, pam_task) = PamAuth::lazy_new(None)?;
+    /// let (mut pam, pam_task) = PamAuth::lazy_new(None)?;
     /// let mut rt = tokio::runtime::Runtime::new()?;
     /// rt.spawn(pam_task.map_err(|_e| debug!("pam_task returned error {}", _e)));
+    ///
+    /// let fut = pam.auth("other", "user", "pass", None)
+    ///     .then(|res| {
+    ///         println!("pam auth result: {:?}", res);
+    ///         res
+    ///     });
+    /// rt.block_on(fut)
+    /// # .map_err(|e| e.into())
+    /// # }
     /// ```
     ///
     pub fn lazy_new(num_threads: Option<usize>) -> Result<(PamAuth, PamAuthTask), io::Error> {
