@@ -56,8 +56,6 @@ use crate::userfs::UserFs;
 
 static PROGNAME: &'static str = "webdav-server";
 
-pub(crate) type BoxedByteStream = Box<futures::Stream<Item = Bytes, Error = io::Error> + Send + 'static>;
-
 // Contains "state" and a handle to the config.
 #[derive(Clone)]
 struct Server {

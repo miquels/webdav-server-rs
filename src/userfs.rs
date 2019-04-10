@@ -113,14 +113,7 @@ impl DavFileSystem for UserFs {
                     None => {
                         self.ugidswitch.run(move || {
                             let path = &self.basedir;
-                            let r = FsQuota::user(self.uid, path)
-                                .or_else(|e| {
-                                    if e == FqError::NoQuota {
-                                        FsQuota::system(path)
-                                    } else {
-                                        Err(e)
-                                    }
-                                })
+                            let r = FsQuota::check(path, Some(self.uid))
                                 .map_err(|_| FsError::GeneralFailure)?;
                             debug!("get_quota for {:?}: insert to cache", key);
                             Ok::<_, FsError>(QCACHE.insert(key, r))
