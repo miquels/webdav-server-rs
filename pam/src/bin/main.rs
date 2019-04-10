@@ -1,7 +1,4 @@
-#[macro_use]
-extern crate error_chain;
-
-use std::io::Write;
+use std::io::{self, Write};
 
 use env_logger;
 
@@ -11,15 +8,7 @@ use tokio;
 
 use pam_sandboxed;
 
-error_chain! {
-    foreign_links {
-        NulError(::std::ffi::NulError);
-        Io(::std::io::Error);
-        Pam(pam_sandboxed::PamError);
-    }
-}
-
-fn prompt(s: &str) -> Result<String> {
+fn prompt(s: &str) -> io::Result<String> {
     print!("{}", s);
     std::io::stdout().flush()?;
     let mut input = String::new();
@@ -27,7 +16,7 @@ fn prompt(s: &str) -> Result<String> {
     Ok(input.trim().to_string())
 }
 
-fn run() -> Result<()> {
+fn main() -> Result<(), Box<std::error::Error>> {
     env_logger::init();
     let name = prompt("What's your login? ")?;
     let pass = prompt("What's your password? ")?;
@@ -57,8 +46,6 @@ fn run() -> Result<()> {
 
     Ok(())
 }
-
-quick_main!(run);
 
 // I've put the tests here in bin/main.rs instead of in lib.rs, because "cargo test"
 // for the library links the tests without -lpam, so it fails. The price we pay
