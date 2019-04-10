@@ -179,14 +179,8 @@ impl UgidSwitch {
 
     pub fn run<F, R>(&self, func: F) -> R
     where F: FnOnce() -> R {
-        if let Some(u) = self.target_ugid.as_ref() {
-            let (base_uid, base_gid) = thread_switch_ugid(u.0, u.1);
-            let r = func();
-            thread_switch_ugid(base_uid, base_gid);
-            r
-        } else {
-            func()
-        }
+        let _guard = self.guard();
+        func()
     }
 
     pub fn guard(&self) -> UgidSwitchGuard {
