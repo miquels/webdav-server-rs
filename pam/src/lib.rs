@@ -8,12 +8,14 @@
 //! PAM machinery and vice-versa.
 //!
 //! Use it as follows:
-//! ```text
+//! ```no_run
+//! // call this once.
 //! let pam = PamAuth::new();
 //!
-//! let fut = pam.auth("user", "pass", "other", None)
+//! // now use `pam` as a handle to authenticate.
+//! let fut = pam.auth("other", "user", "pass", None)
 //!     .then(|res| println!("pam auth result: {}", res));
-//! fut.wait();
+//! tokio::spawn(fut.map_err(|_| ()));
 //! ```
 #[macro_use]
 extern crate log;

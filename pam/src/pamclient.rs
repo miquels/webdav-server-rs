@@ -58,21 +58,30 @@ impl PamAuth {
         Ok(auth)
     }
 
-    /// Like new(), but it returns both an authentication handle (PamAuth)
-    /// and a PamAuthTask future to be used later.
-    /// This is useful if you need to instantiate a PamAuth while not in a runtime.
+    /// Like `new()`, but it returns both an authentication handle (`PamAuth`)
+    /// and a `PamAuthTask` future to be used later.
+    /// This is useful if you need to instantiate a `PamAuth` while not yet in a runtime.
     ///
-    /// You need to spawn the PamAuthTask on the runtime before using the PamAuth handle.
+    /// You need to spawn the `PamAuthTask` on the runtime before using the `PamAuth` handle.
+    ///
+    /// Example:
+    /// ```no_run
+    /// // get pam authentication handle.
+    /// let (pam, pam_task) = PamAuth::lazy_new(None)?;
+    /// let mut rt = tokio::runtime::Runtime::new()?;
+    /// rt.spawn(pam_task.map_err(|_e| debug!("pam_task returned error {}", _e)));
+    /// ```
+    ///
     pub fn lazy_new(num_threads: Option<usize>) -> Result<(PamAuth, PamAuthTask), io::Error> {
         PamAuthTask::start(num_threads)
     }
 
     /// Authenticate via pam and return the result.
     ///
-    /// - service: PAM service to use - usually "other".
-    /// - username: account username
-    /// - password: account password
-    /// - remoteip: if this is a networking service, the remote IP address of the client.
+    /// - `service`: PAM service to use - usually "other".
+    /// - `username`: account username
+    /// - `password`: account password
+    /// - `remoteip`: if this is a networking service, the remote IP address of the client.
     pub fn auth(
         &mut self,
         service: &str,
@@ -107,6 +116,7 @@ enum PamAuthState {
     Response(oneshot::Receiver<Result<(), PamError>>),
 }
 
+/// Future returned by PamAuth::auth().
 pub struct PamAuthFuture {
     state:   PamAuthState,
     resp_rx: Option<oneshot::Receiver<Result<(), PamError>>>,
