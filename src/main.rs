@@ -1,3 +1,4 @@
+#![doc(html_root_url = "https://docs.rs/webdav-server/0.1.0")]
 //! # `webdav-server` is a webdav server that handles user-accounts.
 //!
 //! This is a webdav server that allows access to a users home directory,

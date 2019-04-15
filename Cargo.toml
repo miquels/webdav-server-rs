@@ -1,9 +1,20 @@
 [package]
 name = "webdav-server"
+
+# When releasing to crates.io:
+# - Update html_root_url in src/main.rs
+# - Update CHANGELOG.md.
+# - Create git tag webdav-server-0.x.y
 version = "0.1.0"
+
+readme = "README.md"
+documentation = "https://docs.rs/webdav-server"
+repository = "https://github.com/miquels/webdav-server-rs"
+homepage = "https://github.com/miquels/webdav-server-rs"
 authors = ["Miquel van Smoorenburg <mikevs@xs4all.net>"]
 edition = "2018"
 license = "Apache-2.0"
+categories = ["filesystem"]
 
 [workspace]
 

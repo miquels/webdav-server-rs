@@ -1,3 +1,4 @@
+#![doc(html_root_url = "https://docs.rs/fs-quota/0.1.0")]
 //! Get filesystem disk space used and available for a unix user.
 //!
 //! This crate has support for:

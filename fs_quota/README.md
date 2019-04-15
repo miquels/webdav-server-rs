@@ -1,4 +1,5 @@
-# FS-QUOTA
+
+# fs-quota
 
 Get filesystem disk space used and available for a unix user.
 
@@ -9,10 +10,13 @@ This crate has support for:
 - NFS quotas (via SUNRPC).
 - `libc::vfsstat` lookups (like `df`).
 
-NOTE: right now this is all only implemented for **Linux**.
+The linux ext2/ext3/ext4/xfs quota support only works on linux, not
+on non-linux systems with ext4 or xfs support. The `vfsstat` is also
+system dependant and, at the moment, only implemented for linux.
+
+NFS quota support can be left out by disabling the `nfs` feature.
 
 Example application:
-
 ```rust
 use fs_quota::*;
 
@@ -26,9 +30,8 @@ fn main() {
 }
 ```
 
-## Copyright and License.
+### Copyright and License.
 
  * © 2018, 2019 XS4ALL Internet bv
  * © 2018, 2019 Miquel van Smoorenburg
  * [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0)
-
