@@ -10,20 +10,11 @@ use std::os::raw::{c_char, c_int};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use crate::{FsQuota, FsType, FqError, Mtab};
+use crate::{FsQuota, FqError, Mtab};
 
 // The actual implementation is done in C, and imported here.
 extern "C" {
-    fn fs_quota_linux_ext(
-        device: *const c_char,
-        id: c_int,
-        do_group: c_int,
-        bytes_used: *mut u64,
-        bytes_limit: *mut u64,
-        files_used: *mut u64,
-        files_limit: *mut u64,
-    ) -> c_int;
-    fn fs_quota_linux_xfs(
+    fn fs_quota_linux(
         device: *const c_char,
         id: c_int,
         do_group: c_int,
@@ -35,7 +26,7 @@ extern "C" {
 }
 
 // wrapper for the C functions.
-pub(crate) fn get_quota(device: impl AsRef<Path>, fstype: FsType, uid: u32) -> Result<FsQuota, FqError> {
+pub(crate) fn get_quota(device: impl AsRef<Path>, uid: u32) -> Result<FsQuota, FqError> {
     let id = uid as c_int;
     let device = device.as_ref();
 
@@ -45,30 +36,16 @@ pub(crate) fn get_quota(device: impl AsRef<Path>, fstype: FsType, uid: u32) -> R
     let mut files_limit = 0u64;
 
     let path = CString::new(device.as_os_str().as_bytes())?;
-    let rc = match fstype {
-        FsType::LinuxExt => unsafe {
-            fs_quota_linux_ext(
-                path.as_ptr(),
-                id,
-                0,
-                &mut bytes_used as *mut u64,
-                &mut bytes_limit as *mut u64,
-                &mut files_used as *mut u64,
-                &mut files_limit as *mut u64,
-            )
-        },
-        FsType::LinuxXfs => unsafe {
-            fs_quota_linux_xfs(
-                path.as_ptr(),
-                id,
-                0,
-                &mut bytes_used as *mut u64,
-                &mut bytes_limit as *mut u64,
-                &mut files_used as *mut u64,
-                &mut files_limit as *mut u64,
-            )
-        },
-        _ => 1,
+    let rc = unsafe { 
+        fs_quota_linux(
+            path.as_ptr(),
+            id,
+            0,
+            &mut bytes_used as *mut u64,
+            &mut bytes_limit as *mut u64,
+            &mut files_used as *mut u64,
+            &mut files_limit as *mut u64,
+        )
     };
 
     // Error mapping.

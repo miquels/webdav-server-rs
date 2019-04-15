@@ -104,16 +104,15 @@ impl FsQuota {
         let id = uid.unwrap_or(unsafe { libc::getuid() as u32 });
         let entry = get_mtab_entry(path)?;
 
-        let fst = fstype(&entry.fstype);
-
         #[cfg(feature = "nfs")]
         {
+            let fst = fstype(&entry.fstype);
             if fst == FsType::Nfs {
                 return quota_nfs::get_quota(&entry, id);
             }
         }
 
-        get_quota(&entry.device, fst, id)
+        get_quota(&entry.device, id)
     }
 
     /// Get used and available disk space of the filesystem indicated by `path`.
