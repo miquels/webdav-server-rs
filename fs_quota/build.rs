@@ -31,16 +31,30 @@ fn run_rpcgen() {
 
 fn main() {
     run_rpcgen();
-    cc::Build::new()
-        .file("src/quota-linux.c")
-        .file("src/quota-nfs.c")
-        .file("src/rquota_xdr.c")
+    let mut builder = cc::Build::new();
+
+    #[cfg(target_os = "linux")]
+    builder.file("src/quota-linux.c");
+
+    #[cfg(feature = "nfs")]
+    {
+        builder
+            .file("src/quota-nfs.c")
+            .file("src/rquota_xdr.c");
+    }
+    builder
         .flag_if_supported("-Wno-unused-variable")
         .compile("fs_quota");
 
     println!("cargo:rustc-link-lib=rpcsvc");
 
-    println!("cargo:rerun-if-changed=src/rquota.x");
+    #[cfg(target_os = "linux")]
     println!("cargo:rerun-if-changed=src/quota-linux.c");
-    println!("cargo:rerun-if-changed=src/quota-nfs.c");
+
+    #[cfg(feature = "nfs")]
+    {
+        println!("cargo:rerun-if-changed=src/rquota.x");
+        println!("cargo:rerun-if-changed=src/quota-nfs.c");
+    }
 }
+
