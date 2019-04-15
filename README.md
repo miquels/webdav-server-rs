@@ -12,6 +12,10 @@ most users of this software want to put an NGNIX or Apache reverse-proxy
 in front of it anyway, and that frontend can implement TLS, logging,
 enforcing a maximum number of connections, and timeouts.
 
+This crate uses futures 0.3 and async/await, so it can only be compiled
+with rust nightly. The `rust-toolchain` file currently has it pinned
+on nightly-2019-04-07.
+
 ## Configuration.
 
 See the [example webdav-server.toml file](webdav-server.toml)
