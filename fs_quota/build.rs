@@ -30,7 +30,10 @@ fn run_rpcgen() {
 }
 
 fn main() {
+
+    #[cfg(feature = "nfs")]
     run_rpcgen();
+
     let mut builder = cc::Build::new();
 
     #[cfg(target_os = "linux")]

@@ -89,8 +89,12 @@ impl Server {
         // base path of the users.
         let users_path = match config.users {
             Some(ref users) => {
-                if users.path.contains(":username") {
-                    Some(users.path.replace(":username", ""))
+                if let Some(idx) = users.path.find("/:username") {
+                    let userbase = match &users.path[..idx] {
+                        "" => "/",
+                        x => x,
+                    };
+                    Some(String::from(userbase))
                 } else {
                     None
                 }
@@ -301,8 +305,8 @@ impl Server {
         };
 
         // Could be a request for the virtual root.
-        if let Some(ref users_path) = self.users_path.as_ref() {
-            if path.trim_end_matches('/') == users_path.trim_end_matches('/') {
+        if let Some(users_path) = self.users_path.as_ref() {
+            if is_virtroot(&path, users_path) {
                 let pwd = match await!(self.auth(&req, ip_ref)) {
                     Ok(pwd) => pwd,
                     Err(status) => return await!(self.error(status)),
@@ -685,6 +689,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = rt.block_on_all(servers);
 
     Ok(())
+}
+
+// Is this a file that belongs on the root filesystem?
+// (whether it exists or not)
+fn is_virtroot(path: &str, users_path: &str) -> bool {
+
+    // strip users_path prefix.
+    if !path.starts_with(users_path) {
+        return false;
+    }
+    let p = path[users_path.len()..].trim_start_matches('/');
+
+    // more than one level deep, not the root fs.
+    if p.contains('/') {
+        return false;
+    }
+
+    // only send this to the virtual root fs handler if
+    // we know this file - either root itself, or one of the
+    // special files windows/macos/linux probes for.
+    //
+    // otherwise it could still be a username.
+    p == "" ||
+        p.contains(char::is_uppercase) ||
+        p.starts_with(".") ||
+        p == "internal.dat" ||
+        p == "fakehome.dat" ||
+        p == "loopdir" ||
+        p == "index.html"
 }
 
 // Make a new TcpListener, and if it's a V6 listener, set the
