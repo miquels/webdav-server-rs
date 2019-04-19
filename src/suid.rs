@@ -177,6 +177,7 @@ impl UgidSwitch {
         }
     }
 
+    #[allow(dead_code)]
     pub fn run<F, R>(&self, func: F) -> R
     where F: FnOnce() -> R {
         let _guard = self.guard();
