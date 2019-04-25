@@ -7,7 +7,7 @@ override_dh_auto_build:
 	@if ! command -v cargo >/dev/null; then \
 		echo "Rust is not installed ("cargo" command not found)" >&2; \
 		exit 1; fi
-	cargo +nightly build --release
+	cargo build --release
 
 override_dh_auto_clean:
 
