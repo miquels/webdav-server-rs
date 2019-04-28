@@ -9,7 +9,7 @@
 //!
 //! See the GitHub repository for documentation on how to run the server.
 //!
-#![feature(async_await, await_macro, futures_api)]
+#![feature(async_await, await_macro)]
 
 #[macro_use]
 extern crate clap;
