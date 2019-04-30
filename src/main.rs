@@ -7,7 +7,8 @@
 //! This is an application. There is no API documentation here.
 //! If you want to build your _own_ webdav server, use the `webdav-handler` crate.
 //!
-//! See the GitHub repository for documentation on how to run the server.
+//! See the [GitHub repository](https://github.com/miquels/webdav-server-rs/)
+//! for documentation on how to run the server.
 //!
 #![feature(async_await, await_macro)]
 
