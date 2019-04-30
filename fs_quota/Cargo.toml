@@ -23,8 +23,8 @@ nfs = []
 default = ["nfs"]
 
 [build-dependencies]
-cc = "1.0.35"
+cc = "1.0.36"
 
 [dependencies]
-libc = "0.2.51"
+libc = "0.2.53"
 log = "0.4.6"
