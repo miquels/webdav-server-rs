@@ -40,6 +40,7 @@ use futures::{future, Future, Stream};
 use futures03::compat::Future01CompatExt;
 use futures03::{FutureExt, TryFutureExt};
 use handlebars::Handlebars;
+use headers::{authorization::Basic, Authorization, HeaderMapExt};
 use http;
 use http::status::StatusCode;
 use hyper::{self, server::conn::AddrStream, service::make_service_fn};
@@ -47,7 +48,6 @@ use net2;
 use tokio;
 
 use pam_sandboxed::PamAuth;
-use webdav_handler::typed_headers::{Authorization, Basic, HeaderMapExt};
 use webdav_handler::{fakels::FakeLs, localfs::LocalFs, ls::DavLockSystem, memls::MemLs};
 use webdav_handler::{fs, fs::DavFileSystem, webpath::WebPath, DavConfig, DavHandler};
 
@@ -190,16 +190,15 @@ impl Server {
     ) -> Result<Arc<unixuser::User>, StatusCode>
     {
         // we must have a login/pass
-        let (user, pass) = match req.headers().typed_get::<Authorization<Basic>>() {
-            Some(Authorization(Basic {
-                username,
-                password: Some(password),
-            })) => (username, password),
+        let basic = match req.headers().typed_get::<Authorization<Basic>>() {
+            Some(Authorization(basic)) => basic,
             _ => return Err(StatusCode::UNAUTHORIZED),
         };
+        let user = basic.username();
+        let pass = basic.password();
 
         // check if user exists.
-        let pwd = match await!(cached::unixuser(&user)) {
+        let pwd = match await!(cached::unixuser(user)) {
             Ok(pwd) => pwd,
             Err(_) => return Err(StatusCode::UNAUTHORIZED),
         };
@@ -207,7 +206,7 @@ impl Server {
         // authenticate.
         let service = self.config.pam.service.as_str();
         let pam_auth = self.pam_auth.clone();
-        if let Err(_) = await!(cached::pam_auth(pam_auth, service, &pwd.name, &pass, remote_ip)) {
+        if let Err(_) = await!(cached::pam_auth(pam_auth, service, &pwd.name, pass, remote_ip)) {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
