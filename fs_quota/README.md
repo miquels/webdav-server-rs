@@ -5,14 +5,13 @@ Get filesystem disk space used and available for a unix user.
 
 This crate has support for:
 
-- Linux ext2/ext3/ext4 quotas
-- Linux XFS quotas
+- the Linux quota system
 - NFS quotas (via SUNRPC).
 - `libc::vfsstat` lookups (like `df`).
 
-The linux ext2/ext3/ext4/xfs quota support only works on linux, not
-on non-linux systems with ext4 or xfs support. The `vfsstat` is also
-system dependant and, at the moment, only implemented for linux.
+Both the `quota` systemcall and `vfsstat` systemcall are different
+on every system. That functionality is only implemented on Linux
+right now. NFS quota support _should_ work everywhere.
 
 NFS quota support can be left out by disabling the `nfs` feature.
 
