@@ -100,25 +100,3 @@ pub(crate) fn read_mtab() -> io::Result<Vec<Mtab>> {
     Ok(result)
 }
 
-// The libc statvfs() function.
-fn do_statvfs<P: AsRef<Path>>(path: P) -> io::Result<libc::statvfs> {
-    let cpath = CString::new(path.as_ref().as_os_str().as_bytes())?;
-    let mut sv = unsafe { std::mem::zeroed::<libc::statvfs>() };
-    let rc = unsafe { libc::statvfs(cpath.as_ptr(), &mut sv) };
-    if rc != 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(sv)
-    }
-}
-
-pub(crate) fn statvfs(path: impl AsRef<Path>) -> Result<FsQuota, FqError> {
-    let vfs = do_statvfs(path).map_err(|e| FqError::IoError(e))?;
-    Ok(FsQuota {
-        bytes_used:  ((vfs.f_blocks - vfs.f_bfree) * vfs.f_bsize) as u64,
-        bytes_limit: Some(((vfs.f_blocks - (vfs.f_bfree - vfs.f_bavail)) * vfs.f_bsize) as u64),
-        files_used:  (vfs.f_files - vfs.f_ffree) as u64,
-        files_limit: Some((vfs.f_files - (vfs.f_ffree - vfs.f_favail)) as u64),
-    })
-}
-
