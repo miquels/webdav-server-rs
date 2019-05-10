@@ -169,9 +169,15 @@ pub fn check(cfg: &str, config: &Config) {
         eprintln!("{}: must have at least one of [rootfs] or [users]", cfg);
         exit(1);
     }
-    if config.accounts.setuid && (config.server.uid.is_none() || config.server.gid.is_none()) {
-        eprintln!("{}: [server]: missing uid and/or gid", cfg);
-        exit(1);
+    if config.accounts.setuid {
+        if !crate::suid::has_thread_switch_ugid() {
+            eprintln!("{}: [accounts]: setuid: uid switching not supported on this OS", cfg);
+            exit(1);
+        }
+        if config.server.uid.is_none() || config.server.gid.is_none() {
+            eprintln!("{}: [server]: missing uid and/or gid", cfg);
+            exit(1);
+        }
     }
     if let Some(ref users) = config.users {
         if users.path.contains(":username") && !users.path.ends_with(":username") {

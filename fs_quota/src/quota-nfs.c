@@ -2,8 +2,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <string.h>
 #include <sys/stat.h>
-#include <sys/quota.h>
 
 #include "./rquota.h"
 #define RQUOTA_GETQUOTA_TIMEOUT_SECS 2

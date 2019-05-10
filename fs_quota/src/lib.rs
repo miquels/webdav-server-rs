@@ -44,13 +44,13 @@ mod quota_nfs;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-use linux::{get_quota, read_mtab, statvfs};
+use linux::{get_quota, read_mtab};
 
 // Unsupported OS.
 #[cfg(not(target_os = "linux"))]
 mod generic_os;
 #[cfg(not(target_os = "linux"))]
-use generic_os::{get_quota, read_mtab, statvfs};
+use generic_os::{get_quota, read_mtab};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum FsType {
@@ -119,7 +119,19 @@ impl FsQuota {
     ///
     /// This is not really a quota call; it simply calls `libc::vfsstat` (`df`).
     pub fn system(path: impl AsRef<Path>) -> Result<FsQuota, FqError> {
-        statvfs(path)
+        // Call libc::vfsstat(). It's POSIX so should be supported everywhere.
+        let cpath = CString::new(path.as_ref().as_os_str().as_bytes())?;
+        let mut vfs = unsafe { std::mem::zeroed::<libc::statvfs>() };
+        let rc = unsafe { libc::statvfs(cpath.as_ptr(), &mut vfs) };
+        if rc != 0 {
+            return Err(FqError::IoError(io::Error::last_os_error()));
+        }
+        Ok(FsQuota {
+            bytes_used:  ((vfs.f_blocks - vfs.f_bfree) * vfs.f_bsize) as u64,
+            bytes_limit: Some(((vfs.f_blocks - (vfs.f_bfree - vfs.f_bavail)) * vfs.f_bsize) as u64),
+            files_used:  (vfs.f_files - vfs.f_ffree) as u64,
+            files_limit: Some((vfs.f_files - (vfs.f_ffree - vfs.f_favail)) as u64),
+        })
     }
 
     /// Lookup used and available disk space for a `uid`. First check user's quota,

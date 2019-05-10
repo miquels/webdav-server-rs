@@ -100,7 +100,7 @@ mod setuid {
                         // Change uid.
                         if libc::syscall(SYS_setresuid, cur.euid as uid_t, newuid as uid_t, 0) != 0 {
                             panic!(
-                                "syscall(SYS_setreuid, {}, {}, 0): {:?}",
+                                "syscall(SYS_setresuid, {}, {}, 0): {:?}",
                                 cur.euid,
                                 newuid,
                                 last_os_error()
@@ -121,27 +121,31 @@ mod setuid {
             (olduid, oldgid)
         })
     }
+
+    // Yup.
+    pub fn has_thread_switch_ugid() -> bool {
+        true
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
 mod setuid {
     use super::{drop_aux_groups, last_os_error, DROP_AUX_GROUPS};
-    use libc::{gid_t, setgid, setreuid, syscall, uid_t};
-    const ID_NONE: uid_t = 0xffffffff;
+    use libc::{gid_t, uid_t};
 
     /// Switch process credentials.
     #[allow(dead_code)]
     pub fn switch_ugid(uid: u32, gid: u32) {
         DROP_AUX_GROUPS.call_once(drop_aux_groups);
         unsafe {
-            if libc::setreuid(ID_NONE, 0) != 0 {
-                panic!("libc::setreuid(-1, 0): {:?}", last_os_error());
+            if libc::setuid(0) != 0 {
+                panic!("libc::setuid(0): {:?}", last_os_error());
             }
             if libc::setgid(gid as gid_t) != 0 {
                 panic!("libc::setgid({}): {:?}", gid, last_os_error());
             }
-            if libc::setreuid(0, uid as uid_t) != 0 {
-                panic!("libc::setreuid(0, {}): {:?}", uid, last_os_error());
+            if libc::setresuid(uid as uid_t, uid as uid_t, 0) != 0 {
+                panic!("libc::setreuid({}, {}, 0): {:?}", uid, uid, last_os_error());
             }
         }
     }
@@ -153,12 +157,17 @@ mod setuid {
     // switch the uids of all threads.
     //
     /// Switch thread credentials. Not implemented!
-    pub fn thread_switch_ugid(uid: u32, gid: u32) -> (u32, u32) {
+    pub fn thread_switch_ugid(_uid: u32, _gid: u32) -> (u32, u32) {
         unimplemented!();
+    }
+
+    // Nope.
+    pub fn has_thread_switch_ugid() -> bool {
+        false
     }
 }
 
-pub use self::setuid::{switch_ugid, thread_switch_ugid};
+pub use self::setuid::{switch_ugid, thread_switch_ugid, has_thread_switch_ugid};
 
 #[derive(Clone, Debug)]
 pub struct UgidSwitch {
