@@ -13,8 +13,7 @@ in front of it anyway, and that frontend can implement TLS, logging,
 enforcing a maximum number of connections, and timeouts.
 
 This crate uses futures 0.3 and async/await, so it can only be compiled
-with rust nightly. The `rust-toolchain` file currently has it pinned
-on nightly-2019-04-28.
+with rust nightly until rust 1.37 with async/await support is released.
 
 ## Features.
 

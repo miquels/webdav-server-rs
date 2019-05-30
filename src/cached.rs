@@ -69,7 +69,7 @@ pub async fn pam_auth<'a>(
     }
 
     let mut pam_auth = pam_auth;
-    match await!(pam_auth.auth(&service, &user, &pass, remip).compat()) {
+    match pam_auth.auth(&service, &user, &pass, remip).compat().await {
         Err(e) => Err(e),
         Ok(()) => {
             PAMCACHE.insert(key, user.to_owned());
@@ -82,7 +82,7 @@ pub async fn unixuser(username: &str) -> Result<Arc<User>, io::Error> {
     if let Some(pwd) = PWCACHE.get(username) {
         return Ok(pwd);
     }
-    match await!(User::by_name_async(username)) {
+    match User::by_name_async(username).await {
         Err(e) => Err(e),
         Ok(pwd) => Ok(PWCACHE.insert(username.to_owned(), pwd)),
     }

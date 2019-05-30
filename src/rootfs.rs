@@ -39,7 +39,7 @@ impl DavFileSystem for RootFs {
                 return Err(FsError::NotFound);
             }
             let path = WebPath::from_str("/", "").unwrap();
-            await!(self.fs.metadata(&path))
+            self.fs.metadata(&path).await
         }
             .boxed()
     }
@@ -57,7 +57,7 @@ impl DavFileSystem for RootFs {
                 if self.user != "" {
                     v.push(RootFsDirEntry {
                         name: self.user.clone(),
-                        meta: await!(self.fs.metadata(path)),
+                        meta: self.fs.metadata(path).await,
                     });
                 }
                 let strm = futures03::stream::iter(RootFsReadDir {

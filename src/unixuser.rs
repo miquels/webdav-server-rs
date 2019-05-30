@@ -117,6 +117,6 @@ impl User {
                     Err(_) => panic!("the thread pool has shut down"),
                 }
             });
-        await!(fut)
+        fut.await
     }
 }

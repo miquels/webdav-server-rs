@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/webdav-server/0.1.0")]
+#![doc(html_root_url = "https://docs.rs/webdav-server/0.1.1")]
 //! # `webdav-server` is a webdav server that handles user-accounts.
 //!
 //! This is a webdav server that allows access to a users home directory,
@@ -10,7 +10,7 @@
 //! See the [GitHub repository](https://github.com/miquels/webdav-server-rs/)
 //! for documentation on how to run the server.
 //!
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 #[macro_use]
 extern crate clap;
@@ -178,7 +178,7 @@ impl Server {
         let (parts, body) = req.into_parts();
         let req = http::Request::from_parts(parts, ());
         let self2 = self.clone();
-        async move { await!(self2.handle_async(req, body, remote_ip)) }
+        async move { self2.handle_async(req, body, remote_ip).await }
             .boxed()
             .compat()
     }
@@ -199,7 +199,7 @@ impl Server {
         let pass = basic.password();
 
         // check if user exists.
-        let pwd = match await!(cached::unixuser(user)) {
+        let pwd = match cached::unixuser(user).await {
             Ok(pwd) => pwd,
             Err(_) => return Err(StatusCode::UNAUTHORIZED),
         };
@@ -207,7 +207,7 @@ impl Server {
         // authenticate.
         let service = self.config.pam.service.as_str();
         let pam_auth = self.pam_auth.clone();
-        if let Err(_) = await!(cached::pam_auth(pam_auth, service, &pwd.name, pass, remote_ip)) {
+        if let Err(_) = cached::pam_auth(pam_auth, service, &pwd.name, pass, remote_ip).await {
             return Err(StatusCode::UNAUTHORIZED);
         }
 
@@ -286,14 +286,14 @@ impl Server {
             if let Some((webpath, do_auth)) = self.is_realroot(req.uri()) {
                 debug!("handle_async: {:?}: handle as realroot", req.uri());
                 let user = if do_auth {
-                    match await!(self.auth(&req, ip_ref)) {
+                    match self.auth(&req, ip_ref).await {
                         Ok(pwd) => Some(pwd.name.clone()),
-                        Err(status) => return await!(self.error(status)),
+                        Err(status) => return self.error(status).await,
                     }
                 } else {
                     None
                 };
-                return await!(self.handle_realroot(req, body, user, webpath));
+                return self.handle_realroot(req, body, user, webpath).await;
             }
             debug!("handle_async: {:?}: not realroot", req.uri());
         }
@@ -301,18 +301,18 @@ impl Server {
         // Normalize the path.
         let path = match WebPath::from_uri(req.uri(), "") {
             Ok(path) => path.as_utf8_string_with_prefix(),
-            Err(_) => return await!(self.error(StatusCode::BAD_REQUEST)),
+            Err(_) => return self.error(StatusCode::BAD_REQUEST).await,
         };
 
         // Could be a request for the virtual root.
         if let Some(users_path) = self.users_path.as_ref() {
             if is_virtroot(&path, users_path) {
-                let pwd = match await!(self.auth(&req, ip_ref)) {
+                let pwd = match self.auth(&req, ip_ref).await {
                     Ok(pwd) => pwd,
-                    Err(status) => return await!(self.error(status)),
+                    Err(status) => return self.error(status).await,
                 };
                 debug!("handle_async: {:?}: handle as virtualroot", req.uri());
-                return await!(self.handle_virtualroot(req, body, pwd));
+                return self.handle_virtualroot(req, body, pwd).await;
             }
         }
 
@@ -320,13 +320,13 @@ impl Server {
         let prefix = self.user_path("");
         if !path.starts_with(&prefix) {
             debug!("handle_async: {}: doesn't match start with {}", path, prefix);
-            return await!(self.error(StatusCode::NOT_FOUND));
+            return self.error(StatusCode::NOT_FOUND).await;
         }
 
         // authenticate now.
-        let pwd = match await!(self.auth(&req, ip_ref)) {
+        let pwd = match self.auth(&req, ip_ref).await {
             Ok(pwd) => pwd,
-            Err(status) => return await!(self.error(status)),
+            Err(status) => return self.error(status).await,
         };
 
         // Check if username matches basedir.
@@ -337,11 +337,11 @@ impl Server {
                 "Server::handle: user {} prefix {} path {} -> 401",
                 pwd.name, prefix, path
             );
-            return await!(self.error(StatusCode::UNAUTHORIZED));
+            return self.error(StatusCode::UNAUTHORIZED).await;
         }
 
         // All set.
-        await!(self.handle_user(req, body, prefix, pwd))
+        self.handle_user(req, body, prefix, pwd).await
     }
 
     async fn error(&self, code: StatusCode) -> HyperResult {
@@ -390,7 +390,7 @@ impl Server {
         let mut webpath = webpath;
         let mut filename = match std::str::from_utf8(webpath.file_name()) {
             Ok(n) => n,
-            Err(_) => return await!(self.error(StatusCode::NOT_FOUND)),
+            Err(_) => return self.error(StatusCode::NOT_FOUND).await,
         };
 
         let rootfs = self.config.rootfs.as_ref().unwrap();
@@ -412,26 +412,26 @@ impl Server {
 
         // see if file exists.
         let fs: Box<DavFileSystem> = LocalFs::new(&rootfs.directory, true, false, false);
-        if await!(fs.metadata(&webpath)).is_err() {
+        if fs.metadata(&webpath).await.is_err() {
             if let Some(users_path) = self.users_path.as_ref() {
                 if users_path == &rootfs.path {
                     // file doesn't exist and we share the path with the users path.
                     // if it matches a valid username, redirect.
-                    if await!(cached::unixuser(&filename)).is_ok() {
+                    if cached::unixuser(&filename).await.is_ok() {
                         debug!("Server::handle_realroot: redirect to /{}/", filename);
                         let mut p = WebPath::from_str(&rootfs.path, "").unwrap();
                         p.push_segment(filename.as_bytes());
                         p.add_slash();
-                        return await!(self.redirect(p.as_utf8_string_with_prefix()));
+                        return self.redirect(p.as_utf8_string_with_prefix()).await;
                     }
                 }
             }
-            return await!(self.error(StatusCode::NOT_FOUND));
+            return self.error(StatusCode::NOT_FOUND).await;
         }
 
         // Might be handlebars.
         if filename.ends_with(".hbs") {
-            return await!(self.render_hbs(req, fs, webpath, user));
+            return self.render_hbs(req, fs, webpath, user).await;
         }
 
         // serve.
@@ -439,7 +439,7 @@ impl Server {
             fs: Some(fs),
             ..DavConfig::default()
         };
-        await!(self.run_davhandler(req, body, config))
+        self.run_davhandler(req, body, config).await
     }
 
     // handlebars support.
@@ -453,11 +453,11 @@ impl Server {
     {
         let filename = std::str::from_utf8(webpath.file_name()).unwrap();
         debug!("Server::render_hbs {}", filename);
-        let indata = match await!(read_file(&mut fs, &webpath)) {
+        let indata = match read_file(&mut fs, &webpath).await {
             Ok(data) => data,
             Err(e) => {
                 debug!("render_hbs: {}: {:?}", filename, e);
-                return await!(self.error(StatusCode::INTERNAL_SERVER_ERROR));
+                return self.error(StatusCode::INTERNAL_SERVER_ERROR).await;
             },
         };
         let hbs = Handlebars::new();
@@ -477,7 +477,7 @@ impl Server {
             Ok(data) => data,
             Err(e) => {
                 debug!("handle_realroot: {}: render template: {:?}", filename, e);
-                return await!(self.error(StatusCode::INTERNAL_SERVER_ERROR));
+                return self.error(StatusCode::INTERNAL_SERVER_ERROR).await;
             },
         };
         self.response_builder()
@@ -518,7 +518,7 @@ impl Server {
             allow: Some(methods),
             ..DavConfig::default()
         };
-        await!(self.run_davhandler(req, body, config))
+        self.run_davhandler(req, body, config).await
     }
 
     async fn handle_user(
@@ -532,7 +532,7 @@ impl Server {
         // do we have a users section?
         let users = match self.config.users {
             Some(ref users) => users,
-            None => return await!(self.error(StatusCode::NOT_FOUND)),
+            None => return self.error(StatusCode::NOT_FOUND).await,
         };
 
         let ugid = match self.config.accounts.setuid {
@@ -558,7 +558,7 @@ impl Server {
             hide_symlinks: users.hide_symlinks,
             ..DavConfig::default()
         };
-        await!(self.run_davhandler(req, body, config))
+        self.run_davhandler(req, body, config).await
     }
 
     async fn run_davhandler(
@@ -573,7 +573,7 @@ impl Server {
         let req = http::Request::from_parts(parts, body.map(|item| Bytes::from(item)));
 
         // run handler, then transform http::Response into hyper::Response.
-        let resp = await!(self.dh.handle_with(config, req).compat())?;
+        let resp = self.dh.handle_with(config, req).compat().await?;
         let (mut parts, body) = resp.into_parts();
         self.set_server_header(&mut parts.headers);
         let body = hyper::Body::wrap_stream(body);
@@ -744,11 +744,11 @@ async fn read_file<'a>(
         read: true,
         ..fs::OpenOptions::default()
     };
-    let mut file = await!(fs.open(webpath, oo))?;
+    let mut file = fs.open(webpath, oo).await?;
     let mut buffer = [0; 8192];
     let mut data = Vec::new();
     loop {
-        let n = await!(file.read_bytes(&mut buffer[..]))?;
+        let n = file.read_bytes(&mut buffer[..]).await?;
         if n == 0 {
             break;
         }
