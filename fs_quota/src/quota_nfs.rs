@@ -71,7 +71,7 @@ pub(crate) fn get_quota(entry: &Mtab, uid: u32) -> Result<FsQuota, FqError> {
             debug!("nfs: permission denied");
             return Err(FqError::PermissionDenied);
         },
-        c @ 0x00100000...0x001fffff => {
+        c @ 0x00100000..=0x001fffff => {
             let e = c & 0x000fffff;
             debug!("nfs: clnt_call error: {}", clnt_sperrno(e));
             return Err(FqError::Other);

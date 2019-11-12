@@ -12,8 +12,8 @@ most users of this software want to put an NGNIX or Apache reverse-proxy
 in front of it anyway, and that frontend can implement TLS, logging,
 enforcing a maximum number of connections, and timeouts.
 
-This crate uses futures 0.3 and async/await, so it can only be compiled
-with rust nightly until rust 1.37 with async/await support is released.
+This crate uses futures 0.3 and async/await, so the minimum rust
+compiler version is 1.39.
 
 ## Features.
 

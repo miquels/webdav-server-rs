@@ -10,7 +10,6 @@
 //! See the [GitHub repository](https://github.com/miquels/webdav-server-rs/)
 //! for documentation on how to run the server.
 //!
-#![feature(async_await)]
 
 #[macro_use]
 extern crate clap;
@@ -76,8 +75,8 @@ impl Server {
     pub fn new(config: Arc<config::Config>, auth: PamAuth) -> Self {
         // any locksystem?
         let ls = match config.webdav.locksystem.as_str() {
-            "" | "fakels" => Some(FakeLs::new() as Box<DavLockSystem>),
-            "memls" => Some(MemLs::new() as Box<DavLockSystem>),
+            "" | "fakels" => Some(FakeLs::new() as Box<dyn DavLockSystem>),
+            "memls" => Some(MemLs::new() as Box<dyn DavLockSystem>),
             _ => None,
         };
 
@@ -411,7 +410,7 @@ impl Server {
         }
 
         // see if file exists.
-        let fs: Box<DavFileSystem> = LocalFs::new(&rootfs.directory, true, false, false);
+        let fs: Box<dyn DavFileSystem> = LocalFs::new(&rootfs.directory, true, false, false);
         if fs.metadata(&webpath).await.is_err() {
             if let Some(users_path) = self.users_path.as_ref() {
                 if users_path == &rootfs.path {
@@ -446,7 +445,7 @@ impl Server {
     async fn render_hbs(
         &self,
         req: http::Request<()>,
-        mut fs: Box<DavFileSystem + 'static>,
+        mut fs: Box<dyn DavFileSystem>,
         webpath: WebPath,
         user: Option<String>,
     ) -> HyperResult
@@ -736,7 +735,7 @@ fn make_listener(addr: &SocketAddr) -> io::Result<std::net::TcpListener> {
 }
 
 async fn read_file<'a>(
-    fs: &'a mut Box<DavFileSystem + 'static>,
+    fs: &'a mut Box<dyn DavFileSystem>,
     webpath: &'a WebPath,
 ) -> fs::FsResult<String>
 {

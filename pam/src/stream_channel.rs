@@ -44,8 +44,8 @@ pub(crate) struct Receiver<T> {
 }
 
 enum ReadState {
-    Header(ReadExact<Box<AsyncRead + Send>, Vec<u8>>),
-    Body(ReadExact<Box<AsyncRead + Send>, Vec<u8>>),
+    Header(ReadExact<Box<dyn AsyncRead + Send>, Vec<u8>>),
+    Body(ReadExact<Box<dyn AsyncRead + Send>, Vec<u8>>),
 }
 
 pub(crate) fn receiver<T, A>(a: A) -> Receiver<T>
@@ -119,8 +119,8 @@ pub(crate) struct Sender<T> {
 }
 
 enum SendState {
-    Ready(Box<AsyncWrite + Send>),
-    Writing(WriteAll<Box<AsyncWrite + Send>, Vec<u8>>),
+    Ready(Box<dyn AsyncWrite + Send>),
+    Writing(WriteAll<Box<dyn AsyncWrite + Send>, Vec<u8>>),
     Empty,
 }
 

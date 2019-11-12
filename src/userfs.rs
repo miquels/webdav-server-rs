@@ -1,8 +1,8 @@
+use std::any::Any;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::time::Duration;
 
-use futures03::{FutureExt, Stream};
+use futures03::FutureExt;
 
 use webdav_handler::fs::*;
 use webdav_handler::localfs::LocalFs;
@@ -37,7 +37,7 @@ impl UserFs {
 
         // set up the LocalFs hooks for uid switching.
         let switch = UgidSwitch::new(target_ugid.clone());
-        let blocking_guard = Box::new(move || Box::new(switch.guard()) as Box<std::any::Any>);
+        let blocking_guard = Box::new(move || Box::new(switch.guard()) as Box<dyn Any>);
 
         Box::new(UserFs {
             basedir:    dir.as_ref().to_path_buf(),
@@ -54,11 +54,11 @@ impl UserFs {
 }
 
 impl DavFileSystem for UserFs {
-    fn metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<DavMetaData>> {
+    fn metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<dyn DavMetaData>> {
         self.fs.metadata(path)
     }
 
-    fn symlink_metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<DavMetaData>> {
+    fn symlink_metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<dyn DavMetaData>> {
         self.fs.symlink_metadata(path)
     }
 
@@ -66,12 +66,12 @@ impl DavFileSystem for UserFs {
         &'a self,
         path: &'a WebPath,
         meta: ReadDirMeta,
-    ) -> FsFuture<Pin<Box<Stream<Item = Box<DavDirEntry>> + Send>>>
+    ) -> FsFuture<FsStream<Box<dyn DavDirEntry>>>
     {
         self.fs.read_dir(path, meta)
     }
 
-    fn open<'a>(&'a self, path: &'a WebPath, options: OpenOptions) -> FsFuture<Box<DavFile>> {
+    fn open<'a>(&'a self, path: &'a WebPath, options: OpenOptions) -> FsFuture<Box<dyn DavFile>> {
         self.fs.open(path, options)
     }
 

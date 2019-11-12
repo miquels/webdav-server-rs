@@ -1,3 +1,10 @@
+webdav-server-rs (0.2) buster; urgency=low
+
+  * update to webdav-handler-rs 0.1.2
+  * update to modern(erder) Rust
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Tue, 12 Nov 2019 15:41:53 +0100
+
 webdav-server-rs (0.1) wheezy jessie stretch; urgency=low
 
   * initial release

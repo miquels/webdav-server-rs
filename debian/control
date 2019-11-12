@@ -3,7 +3,7 @@ Section: net
 Priority: extra
 Maintainer: Miquel van Smoorenburg <mike@langeraar.net>
 Uploaders: XS4ALL Unixbeheer <unixbeheer@xs4all.net>, Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>
-Build-Depends: debhelper (>= 9), dh-systemd, gcc, libc-dev, libc-dev-bin, libpam0g-dev
+Build-Depends: debhelper (>= 12), gcc, libc-dev, libc-dev-bin, libpam0g-dev
 Standards-Version: 3.9.1
 
 Package: webdav-server-rs

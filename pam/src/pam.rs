@@ -56,7 +56,7 @@ impl Error for PamError {
         "PAM authentication error"
     }
 
-    fn cause(&self) -> Option<&Error> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         None
     }
 }

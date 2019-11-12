@@ -5,9 +5,8 @@
 //
 use std;
 use std::path::Path;
-use std::pin::Pin;
 
-use futures03::{FutureExt, Stream};
+use futures03::FutureExt;
 
 use webdav_handler::fs::*;
 use webdav_handler::webpath::WebPath;
@@ -32,7 +31,7 @@ impl RootFs {
 
 impl DavFileSystem for RootFs {
     // Only allow "/" or "/user", for both return the metadata of the UserFs root.
-    fn metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<DavMetaData>> {
+    fn metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<dyn DavMetaData>> {
         async move {
             let b = path.as_bytes();
             if b != b"/" && &b[1..] != self.user.as_bytes() {
@@ -49,7 +48,7 @@ impl DavFileSystem for RootFs {
         &'a self,
         path: &'a WebPath,
         _meta: ReadDirMeta,
-    ) -> FsFuture<Pin<Box<Stream<Item = Box<DavDirEntry>> + Send>>>
+    ) -> FsFuture<FsStream<Box<dyn DavDirEntry>>>
     {
         Box::pin(
             async move {
@@ -63,13 +62,13 @@ impl DavFileSystem for RootFs {
                 let strm = futures03::stream::iter(RootFsReadDir {
                     iterator: v.into_iter(),
                 });
-                Ok(Box::pin(strm) as Pin<Box<Stream<Item = Box<DavDirEntry>> + Send>>)
+                Ok(Box::pin(strm) as FsStream<Box<dyn DavDirEntry>>)
             },
         )
     }
 
     // cannot open any files.
-    fn open(&self, _path: &WebPath, _options: OpenOptions) -> FsFuture<Box<DavFile>> {
+    fn open(&self, _path: &WebPath, _options: OpenOptions) -> FsFuture<Box<dyn DavFile>> {
         Box::pin(futures03::future::ready(Err(FsError::NotImplemented)))
     }
 
@@ -85,9 +84,9 @@ struct RootFsReadDir {
 }
 
 impl Iterator for RootFsReadDir {
-    type Item = Box<DavDirEntry>;
+    type Item = Box<dyn DavDirEntry>;
 
-    fn next(&mut self) -> Option<Box<DavDirEntry>> {
+    fn next(&mut self) -> Option<Box<dyn DavDirEntry>> {
         match self.iterator.next() {
             None => return None,
             Some(entry) => Some(Box::new(entry)),
@@ -97,12 +96,12 @@ impl Iterator for RootFsReadDir {
 
 #[derive(Debug)]
 struct RootFsDirEntry {
-    meta: FsResult<Box<DavMetaData>>,
+    meta: FsResult<Box<dyn DavMetaData>>,
     name: String,
 }
 
 impl DavDirEntry for RootFsDirEntry {
-    fn metadata(&self) -> FsFuture<Box<DavMetaData>> {
+    fn metadata(&self) -> FsFuture<Box<dyn DavMetaData>> {
         Box::pin(futures03::future::ready(self.meta.clone()))
     }
 
