@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/pam-sandboxed/0.1.0")]
+#![doc(html_root_url = "https://docs.rs/pam-sandboxed/0.2.0")]
 //! ## PAM authentication with the pam library running in a separate process.
 //!
 //! The PAM client in this crate creates a future that resolves with the
@@ -27,19 +27,19 @@
 //!   handles setuid() gets confused.
 //!
 //! ## EXAMPLE.
-//! ```no_run
-//! # use futures::Future;
-//! # use pam_sandboxed::*;
-//! // call this once.
-//! let mut pam = PamAuth::new(None).expect("failed to initialized PAM");
+//! ```
+//! use pam_sandboxed::PamAuth;
 //!
-//! // now use `pam` as a handle to authenticate.
-//! let fut = pam.auth("other", "user", "pass", None)
-//!     .then(|res| {
+//! fn main() {
+//!     // call this once, early.
+//!     let mut pam = PamAuth::new(None).expect("failed to initialized PAM");
+//!
+//!     let rt = tokio::runtime::Runtime::new().expect("failed to initialize tokio runtime");
+//!     rt.block_on(async move {
+//!         let res = pam.auth("other", "user", "pass", None).await;
 //!         println!("pam auth result: {:?}", res);
-//!         res
 //!     });
-//! tokio::spawn(fut.map_err(|_| ()));
+//! }
 //! ```
 #[macro_use]
 extern crate log;
@@ -49,12 +49,11 @@ extern crate serde_derive;
 mod pam;
 mod pamclient;
 mod pamserver;
-mod stream_channel;
 
 use std::sync::atomic::Ordering;
 
 pub use crate::pam::PamError;
-pub use crate::pamclient::{PamAuth, PamAuthFuture};
+pub use crate::pamclient::PamAuth;
 
 // See bin/main.rs, mod tests.
 #[doc(hidden)]

@@ -1,50 +1,31 @@
 use std::io::{self, Write};
 
 use env_logger;
-
-use futures::future;
-use futures::prelude::*;
-use tokio;
-
-use pam_sandboxed;
+use pam_sandboxed::PamAuth;
 
 fn prompt(s: &str) -> io::Result<String> {
     print!("{}", s);
-    std::io::stdout().flush()?;
+    io::stdout().flush()?;
     let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    io::stdin().read_line(&mut input)?;
     Ok(input.trim().to_string())
 }
 
-fn main() -> Result<(), Box<std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let name = prompt("What's your login? ")?;
     let pass = prompt("What's your password? ")?;
 
-    let fut = future::ok::<(), ()>(())
-        .then(|_| {
-            match pam_sandboxed::PamAuth::new(None) {
-                Ok(p) => Ok(p),
-                Err(_e) => {
-                    eprintln!("PamAuth::new() returned error: {}", _e);
-                    Err(())
-                },
-            }
-        })
-        .and_then(move |mut pam| {
-            tokio::spawn(
-                pam.auth("other", &name, &pass, None)
-                    .map(|_res| println!("pam.auth returned Ok({:?})", _res))
-                    .map_err(|_e| println!("pam.auth returned error: {}", _e)),
-            )
-        });
+    let mut pamauth = PamAuth::new(None)?;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    if let Err(e) = rt.block_on_all(fut) {
-        eprintln!("runtime returned error {:?}", e);
-    }
-
-    Ok(())
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        match pamauth.auth("other", &name, &pass, None).await {
+            Ok(res) => println!("pam.auth returned Ok({:?})", res),
+            Err(e) => println!("pam.auth returned error: {}", e),
+        }
+        Ok(())
+    })
 }
 
 // I've put the tests here in bin/main.rs instead of in lib.rs, because "cargo test"
@@ -52,8 +33,6 @@ fn main() -> Result<(), Box<std::error::Error>> {
 // for that is a dynamic test-mode setting in the library, instead of compile-time.
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use futures::future::lazy;
     use pam_sandboxed::{test_mode, PamAuth, PamError};
     use tokio;
 
@@ -62,46 +41,45 @@ mod tests {
     #[test]
     fn test_auth() {
         test_mode(true);
-        let fut = lazy(move || {
-            let mut pam = PamAuth::new(None).unwrap();
-            let mut pam2 = pam.clone();
-            pam.auth(TEST_STR, "test", "foo", Some(TEST_STR))
-                .map_err(|e| {
-                    eprintln!("auth(test) failed: {:?}", e);
-                    e
-                })
-                .and_then(move |_| {
-                    pam2.auth(TEST_STR, "unknown", "bar", Some(TEST_STR)).then(|res| {
-                        match res {
-                            Ok(()) => {
-                                eprintln!("auth(unknown) succeeded, should have failed");
-                                Err(PamError::unknown())
-                            },
-                            Err(_) => Ok(()),
-                        }
-                    })
-                })
-        });
 
+        let mut pam = PamAuth::new(None).unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        assert!(rt.block_on_all(fut).is_ok());
+
+        let res = rt.block_on(async {
+            let mut pam2 = pam.clone();
+
+            if let Err(e) = pam.auth(TEST_STR, "test", "foo", Some(TEST_STR)).await {
+                eprintln!("auth(test) failed: {:?}", e);
+                return Err(e);
+            }
+
+            if let Ok(_) = pam2.auth(TEST_STR, "unknown", "bar", Some(TEST_STR)).await {
+                eprintln!("auth(unknown) succeeded, should have failed");
+                return Err(PamError::unknown());
+            }
+
+            Ok(())
+        });
+        assert!(res.is_ok());
     }
 
     #[test]
     fn test_many() {
         test_mode(true);
-        let fut = lazy(move || {
-            let mut pam = PamAuth::new(None).unwrap();
-            for i in 1..=1000 {
-                tokio::spawn(
-                    pam.auth(TEST_STR, "test", "bar", Some(TEST_STR))
-                        .map_err(move |e| panic!("auth(test) failed at iteration {}: {:?}", i, e)),
-                );
-            }
-            futures::future::ok::<(), ()>(())
-        });
 
+        let pam = PamAuth::new(None).unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        assert!(rt.block_on_all(fut).is_ok());
+
+        rt.block_on(async move {
+            for i in 1u32..=1000 {
+                let mut pam = pam.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = pam.auth(TEST_STR, "test", "bar", Some(TEST_STR)).await {
+                        panic!("auth(test) failed at iteration {}: {:?}", i, e);
+                    }
+                });
+            }
+        });
+        rt.shutdown_on_idle();
     }
 }
