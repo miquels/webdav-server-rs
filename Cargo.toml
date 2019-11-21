@@ -23,7 +23,7 @@ categories = ["filesystem"]
 clap = "2.33.0"
 env_logger = "0.7.1"
 fs-quota = { path = "fs_quota", version = "0.1.0" }
-futures = { package = "futures-preview", version = "=0.3.0-alpha.19", features = ["io-compat"] }
+futures = { package = "futures-preview", version = "=0.3.0-alpha.19" }
 handlebars = "2.0.2"
 headers = "0.2.3"
 http = "0.1.19"
