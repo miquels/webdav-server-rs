@@ -2,8 +2,7 @@ use std::any::Any;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use futures03::FutureExt;
-
+use futures::future::FutureExt;
 use webdav_handler::fs::*;
 use webdav_handler::localfs::LocalFs;
 use webdav_handler::webpath::WebPath;

@@ -6,8 +6,7 @@
 use std;
 use std::path::Path;
 
-use futures03::FutureExt;
-
+use futures::future::{self, FutureExt};
 use webdav_handler::fs::*;
 use webdav_handler::webpath::WebPath;
 
@@ -59,7 +58,7 @@ impl DavFileSystem for RootFs {
                         meta: self.fs.metadata(path).await,
                     });
                 }
-                let strm = futures03::stream::iter(RootFsReadDir {
+                let strm = futures::stream::iter(RootFsReadDir {
                     iterator: v.into_iter(),
                 });
                 Ok(Box::pin(strm) as FsStream<Box<dyn DavDirEntry>>)
@@ -69,7 +68,7 @@ impl DavFileSystem for RootFs {
 
     // cannot open any files.
     fn open(&self, _path: &WebPath, _options: OpenOptions) -> FsFuture<Box<dyn DavFile>> {
-        Box::pin(futures03::future::ready(Err(FsError::NotImplemented)))
+        Box::pin(future::ready(Err(FsError::NotImplemented)))
     }
 
     // forward quota.
@@ -102,7 +101,7 @@ struct RootFsDirEntry {
 
 impl DavDirEntry for RootFsDirEntry {
     fn metadata(&self) -> FsFuture<Box<dyn DavMetaData>> {
-        Box::pin(futures03::future::ready(self.meta.clone()))
+        Box::pin(future::ready(self.meta.clone()))
     }
 
     fn name(&self) -> Vec<u8> {
@@ -110,6 +109,6 @@ impl DavDirEntry for RootFsDirEntry {
     }
 
     fn is_dir(&self) -> FsFuture<bool> {
-        Box::pin(futures03::future::ready(Ok(true)))
+        Box::pin(future::ready(Ok(true)))
     }
 }

@@ -4,10 +4,8 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use futures03::compat::Future01CompatExt;
-use futures03::FutureExt;
-
-use tokio_threadpool;
+use futures::future;
+use tokio_executor::threadpool;
 
 use libc;
 use libc::{c_char, getpwnam_r, getpwuid_r};
@@ -49,6 +47,17 @@ unsafe fn to_passwd(pwd: &libc::passwd) -> User {
         shell:  cs_shell.to_path_buf(),
         uid:    pwd.pw_uid,
         gid:    pwd.pw_gid,
+    }
+}
+
+// Run some code via tokio_executor::threadpool::blocking().
+async fn blocking<F, T>(func: F) -> T
+where F: FnOnce() -> T {
+    let mut func = Some(func);
+    let r = future::poll_fn(move |_cx| threadpool::blocking(|| (func.take().unwrap())())).await;
+    match r {
+        Ok(x) => x,
+        Err(_) => panic!("the thread pool has shut down"),
     }
 }
 
@@ -109,14 +118,6 @@ impl User {
     }
 
     pub async fn by_name_async(name: &str) -> Result<User, io::Error> {
-        let fut = futures::future::poll_fn(move || tokio_threadpool::blocking(move || User::by_name(name)))
-            .compat()
-            .then(|res| {
-                match res {
-                    Ok(x) => futures03::future::ready(x),
-                    Err(_) => panic!("the thread pool has shut down"),
-                }
-            });
-        fut.await
+        blocking(move || User::by_name(name)).await
     }
 }

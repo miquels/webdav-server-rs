@@ -34,16 +34,12 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::process::exit;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use env_logger;
-use futures::{future, Future, Stream};
-use futures03::compat::Future01CompatExt;
-use futures03::{FutureExt, TryFutureExt};
 use handlebars::Handlebars;
 use headers::{authorization::Basic, Authorization, HeaderMapExt};
 use http;
 use http::status::StatusCode;
-use hyper::{self, server::conn::AddrStream, service::make_service_fn};
+use hyper::{self, server::conn::AddrStream, service::{service_fn, make_service_fn}};
 use net2;
 use tokio;
 
@@ -67,7 +63,8 @@ struct Server {
 }
 
 #[allow(dead_code)]
-type HyperResult = Result<hyper::Response<hyper::Body>, io::Error>;
+type HttpResult = Result<hyper::Response<webdav_handler::body::Body>, io::Error>;
+type HttpRequest = http::Request<hyper::Body>;
 
 // Server implementation.
 impl Server {
@@ -147,45 +144,10 @@ impl Server {
         Some((webpath, rootfs.auth))
     }
 
-    // futures 0.1 adapter.
-    fn handle(
-        &self,
-        req: hyper::Request<hyper::Body>,
-        remote_ip: SocketAddr,
-    ) -> impl Future<Item = hyper::Response<hyper::Body>, Error = io::Error> + Send + 'static
-    {
-        // NOTE: we move the body out of the request, and pass it seperatly.
-        //
-        // That is needed since parts from the request can be borrowed,
-        // e.g. when you pass req.uri() to  a function. The async/await/futures stuff in
-        // the compiler then needs the Request to be Sync, and the body isn't.
-        //
-        //         error[E0277]: `ReqBody` cannot be shared between threads safely
-        //   --> src/main.rs:26:12
-        //    |
-        // 26 |         -> impl Future<Item=http::Response<()>, Error=std::io::Error> + Send + 'a
-        //    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        //    |            `ReqBody` cannot be shared between threads safely
-        //    |
-        //    = help: within `http::request::Request<ReqBody>`, the trait `std::marker::Sync` is
-        //      not implemented for `ReqBody`
-        //    = help: consider adding a `where ReqBody: std::marker::Sync` bound
-        //    = note: required because it appears within the type `http::request::Request<ReqBody>`
-        //    = note: required because of the requirements on the impl of `std::marker::Send`
-        //      for `&http::request::Request<ReqBody>`
-        //
-        let (parts, body) = req.into_parts();
-        let req = http::Request::from_parts(parts, ());
-        let self2 = self.clone();
-        async move { self2.handle_async(req, body, remote_ip).await }
-            .boxed()
-            .compat()
-    }
-
     // authenticate user.
     async fn auth<'a>(
         &'a self,
-        req: &'a http::Request<()>,
+        req: &'a HttpRequest,
         remote_ip: Option<&'a str>,
     ) -> Result<Arc<unixuser::User>, StatusCode>
     {
@@ -254,12 +216,11 @@ impl Server {
     }
 
     // handle a request.
-    async fn handle_async(
+    async fn handle(
         &self,
-        req: http::Request<()>,
-        body: hyper::Body,
+        req: HttpRequest,
         remote_ip: SocketAddr,
-    ) -> HyperResult
+    ) -> HttpResult
     {
         // stringify the remote IP address.
         let ip = remote_ip.ip();
@@ -283,7 +244,7 @@ impl Server {
         let method = req.method();
         if method == &http::Method::GET || method == &http::Method::HEAD {
             if let Some((webpath, do_auth)) = self.is_realroot(req.uri()) {
-                debug!("handle_async: {:?}: handle as realroot", req.uri());
+                debug!("handle: {:?}: handle as realroot", req.uri());
                 let user = if do_auth {
                     match self.auth(&req, ip_ref).await {
                         Ok(pwd) => Some(pwd.name.clone()),
@@ -292,9 +253,9 @@ impl Server {
                 } else {
                     None
                 };
-                return self.handle_realroot(req, body, user, webpath).await;
+                return self.handle_realroot(req, user, webpath).await;
             }
-            debug!("handle_async: {:?}: not realroot", req.uri());
+            debug!("handle: {:?}: not realroot", req.uri());
         }
 
         // Normalize the path.
@@ -310,15 +271,15 @@ impl Server {
                     Ok(pwd) => pwd,
                     Err(status) => return self.error(status).await,
                 };
-                debug!("handle_async: {:?}: handle as virtualroot", req.uri());
-                return self.handle_virtualroot(req, body, pwd).await;
+                debug!("handle: {:?}: handle as virtualroot", req.uri());
+                return self.handle_virtualroot(req, pwd).await;
             }
         }
 
         // is this the users part of the path?
         let prefix = self.user_path("");
         if !path.starts_with(&prefix) {
-            debug!("handle_async: {}: doesn't match start with {}", path, prefix);
+            debug!("handle: {}: doesn't match start with {}", path, prefix);
             return self.error(StatusCode::NOT_FOUND).await;
         }
 
@@ -340,10 +301,10 @@ impl Server {
         }
 
         // All set.
-        self.handle_user(req, body, prefix, pwd).await
+        self.handle_user(req, prefix, pwd).await
     }
 
-    async fn error(&self, code: StatusCode) -> HyperResult {
+    async fn error(&self, code: StatusCode) -> HttpResult {
         let msg = format!(
             "<error>{} {}</error>\n",
             code.as_u16(),
@@ -365,7 +326,7 @@ impl Server {
         Ok(response.body(msg.into()).unwrap())
     }
 
-    async fn redirect(&self, path: String) -> HyperResult {
+    async fn redirect(&self, path: String) -> HttpResult {
         let resp = self
             .response_builder()
             .status(302)
@@ -379,11 +340,10 @@ impl Server {
     // serve from the local filesystem.
     async fn handle_realroot(
         &self,
-        req: http::Request<()>,
-        body: hyper::Body,
+        req: HttpRequest,
         user: Option<String>,
         webpath: WebPath,
-    ) -> HyperResult
+    ) -> HttpResult
     {
         // get filename.
         let mut webpath = webpath;
@@ -438,17 +398,17 @@ impl Server {
             fs: Some(fs),
             ..DavConfig::default()
         };
-        self.run_davhandler(req, body, config).await
+        self.run_davhandler(config, req).await
     }
 
     // handlebars support.
     async fn render_hbs(
         &self,
-        req: http::Request<()>,
+        req: HttpRequest,
         mut fs: Box<dyn DavFileSystem>,
         webpath: WebPath,
         user: Option<String>,
-    ) -> HyperResult
+    ) -> HttpResult
     {
         let filename = std::str::from_utf8(webpath.file_name()).unwrap();
         debug!("Server::render_hbs {}", filename);
@@ -489,10 +449,9 @@ impl Server {
     // virtual root filesytem for PROPFIND/OPTIONS in "/".
     async fn handle_virtualroot(
         &self,
-        req: http::Request<()>,
-        body: hyper::Body,
+        req: HttpRequest,
         pwd: Arc<unixuser::User>,
-    ) -> HyperResult
+    ) -> HttpResult
     {
         debug!("Server::handle_virtualroot: /");
         let ugid = match self.config.accounts.setuid {
@@ -517,16 +476,15 @@ impl Server {
             allow: Some(methods),
             ..DavConfig::default()
         };
-        self.run_davhandler(req, body, config).await
+        self.run_davhandler(config, req).await
     }
 
     async fn handle_user(
         &self,
-        req: http::Request<()>,
-        body: hyper::Body,
+        req: HttpRequest,
         prefix: String,
         pwd: Arc<unixuser::User>,
-    ) -> HyperResult
+    ) -> HttpResult
     {
         // do we have a users section?
         let users = match self.config.users {
@@ -557,26 +515,25 @@ impl Server {
             hide_symlinks: users.hide_symlinks,
             ..DavConfig::default()
         };
-        self.run_davhandler(req, body, config).await
+        self.run_davhandler(config, req).await
     }
 
+    // Call the davhandler, then add headers to the response.
     async fn run_davhandler(
         &self,
-        req: http::Request<()>,
-        body: hyper::Body,
         config: DavConfig,
-    ) -> HyperResult
+        req: HttpRequest,
+    ) -> HttpResult
     {
-        // move body back into request.
-        let (parts, _) = req.into_parts();
-        let req = http::Request::from_parts(parts, body.map(|item| Bytes::from(item)));
 
-        // run handler, then transform http::Response into hyper::Response.
-        let resp = self.dh.handle_with(config, req).compat().await?;
-        let (mut parts, body) = resp.into_parts();
-        self.set_server_header(&mut parts.headers);
-        let body = hyper::Body::wrap_stream(body);
-        Ok(hyper::Response::from_parts(parts, body))
+        match self.dh.handle_with(config, req).await {
+            Ok(resp) => {
+                let (mut parts, body) = resp.into_parts();
+                self.set_server_header(&mut parts.headers);
+                Ok(http::Response::from_parts(parts, body))
+            },
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -647,10 +604,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(a) => a,
     };
 
-    // get pam task and handle, get a runtime, and start the pam task.
-    let (pam, pam_task) = PamAuth::lazy_new(config.pam.threads.clone())?;
-    let mut rt = tokio::runtime::Runtime::new()?;
-    rt.spawn(pam_task.map_err(|_e| debug!("pam_task returned error {}", _e)));
+    // initialize pam.
+    let pam = PamAuth::new(config.pam.threads.clone())?;
 
     // start servers (one for each listen address).
     let dav_server = Server::new(config.clone(), pam);
@@ -664,17 +619,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         };
         let dav_server = dav_server.clone();
-        let make_service = make_service_fn(move |socket: &AddrStream| {
-            let dav_server = dav_server.clone();
+		let make_service = make_service_fn(move |socket: &AddrStream| {
+			let dav_server = dav_server.clone();
             let remote_addr = socket.remote_addr();
-            hyper::service::service_fn(move |req| dav_server.handle(req, remote_addr))
-        });
+			async move {
+				let func = move |req| {
+					let dav_server = dav_server.clone();
+					async move { dav_server.handle(req, remote_addr).await }
+				};
+				Ok::<_, hyper::Error>(service_fn(func))
+			}
+		});
+
+		let server = hyper::Server::from_tcp(listener)?.tcp_nodelay(true);
         println!("Listening on http://{:?}", sockaddr);
-        let server = hyper::Server::from_tcp(listener)?
-            .tcp_nodelay(true)
-            .serve(make_service)
-            .map_err(|e| eprintln!("server error: {}", e));
-        servers.push(server);
+
+        servers.push(async move {
+            if let Err(e) = server.serve(make_service).await {
+                eprintln!("server error: {}", e);
+            }
+        });
+
     }
 
     // drop privs.
@@ -683,9 +648,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => {},
     }
 
-    // run all servers and wait for them to finish.
-    let servers = future::join_all(servers).then(|_| Ok::<_, hyper::Error>(()));
-    let _ = rt.block_on_all(servers);
+    // start tokio runtime, run all servers, and wait for them to finish.
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        for server in servers.drain(..) {
+            let _ = tokio::spawn(server);
+        }
+    });
+    rt.shutdown_on_idle();
 
     Ok(())
 }

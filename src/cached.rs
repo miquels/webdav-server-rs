@@ -7,8 +7,6 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use futures03::compat::Future01CompatExt;
-
 use crate::cache;
 use crate::unixuser::{self, User};
 use pam_sandboxed::{PamAuth, PamError};
@@ -69,7 +67,7 @@ pub async fn pam_auth<'a>(
     }
 
     let mut pam_auth = pam_auth;
-    match pam_auth.auth(&service, &user, &pass, remip).compat().await {
+    match pam_auth.auth(&service, &user, &pass, remip).await {
         Err(e) => Err(e),
         Ok(()) => {
             PAMCACHE.insert(key, user.to_owned());
