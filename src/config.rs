@@ -108,6 +108,8 @@ pub enum Auth {
     True,
     #[from_str = "opportunistic"]
     Opportunistic,
+    #[from_str = "write"]
+    Write,
 }
 
 #[derive(FromStr, Debug, Clone, Copy)]

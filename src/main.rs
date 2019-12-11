@@ -224,7 +224,9 @@ impl Server {
             }
 
             // handle request.
-            let res = self.handle(req, path, route, location, remote_ip.clone()).await?;
+            let res = self
+                .handle(req, method, path, route, location, remote_ip.clone())
+                .await?;
 
             // no on_notfound? then this is final.
             if reqdata.is_none() || res.status() != StatusCode::NOT_FOUND {
@@ -239,6 +241,7 @@ impl Server {
     async fn handle<'a, 't: 'a, 'p: 'a>(
         &'a self,
         req: HttpRequest,
+        method: DavMethod,
         path: &'a [u8],
         route: MatchedRoute<'t, 'p, usize>,
         location: &'a Location,
@@ -262,6 +265,7 @@ impl Server {
         let do_auth = match location.auth {
             Some(Auth::True) => true,
             Some(Auth::Opportunistic) => auth_hdr.is_some(),
+            Some(Auth::Write) => !DavMethodSet::WEBDAV_RO.contains(method),
             Some(Auth::False) | None => false,
         };
         let auth_user = if do_auth {
@@ -475,7 +479,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     rt.block_on(async move {
-
         // build servers (one for each listen address).
         let dav_server = Server::new(config.clone(), pam);
         let mut servers = Vec::new();
@@ -515,7 +518,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match (&config.server.uid, &config.server.gid) {
             (&Some(uid), &Some(gid)) => {
                 if !suid::have_suid_privs() {
-                    eprintln!("{}: insufficent priviliges to switch uid/gid (not root).", PROGNAME);
+                    eprintln!(
+                        "{}: insufficent priviliges to switch uid/gid (not root).",
+                        PROGNAME
+                    );
                     exit(1);
                 }
                 switch_ugid(uid, gid);

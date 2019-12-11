@@ -67,12 +67,12 @@
   # http-ro: GET, HEAD
   # http-rw: GET, HEAD, PUT
   # webdav-ro: GET, HEAD, OPTIONS, PROPFIND
-  # webdav-rw: GET, HEAD, OPTIONS, PROPFIND, PUT, PATCH, PROPFIND,
-  #            PROPPATCH, MKCOL, COPY, MOVE, DELETE, LOCK, UNLOCK
+  # webdav-rw: GET, HEAD, OPTIONS, PROPFIND, PUT, PATCH, PROPPATCH,
+  #            MKCOL, COPY, MOVE, DELETE, LOCK, UNLOCK
   methods = [ "http-ro" ]
 
-  # Authenticate? true, false, optional, write.
-  # "optional": means "if you send an Authorization: header, we'll check it".
+  # Authenticate? true, false, opportunistic, write.
+  # "opportunistic": means "if you send an Authorization: header, we'll check it".
   # "write": means "for methods not in webdav-ro".
   auth = "false"
 
