@@ -4,11 +4,9 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use futures::future;
-use tokio_executor::threadpool;
-
 use libc;
 use libc::{c_char, getpwnam_r, getpwuid_r};
+use tokio::task::block_in_place;
 
 #[derive(Debug)]
 pub struct User {
@@ -47,17 +45,6 @@ unsafe fn to_passwd(pwd: &libc::passwd) -> User {
         shell:  cs_shell.to_path_buf(),
         uid:    pwd.pw_uid,
         gid:    pwd.pw_gid,
-    }
-}
-
-// Run some code via tokio_executor::threadpool::blocking().
-async fn blocking<F, T>(func: F) -> T
-where F: FnOnce() -> T {
-    let mut func = Some(func);
-    let r = future::poll_fn(move |_cx| threadpool::blocking(|| (func.take().unwrap())())).await;
-    match r {
-        Ok(x) => x,
-        Err(_) => panic!("the thread pool has shut down"),
     }
 }
 
@@ -118,6 +105,6 @@ impl User {
     }
 
     pub async fn by_name_async(name: &str) -> Result<User, io::Error> {
-        blocking(move || User::by_name(name)).await
+        block_in_place(move || User::by_name(name))
     }
 }

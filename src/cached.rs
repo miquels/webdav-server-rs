@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crate::cache;
 use crate::unixuser::{self, User};
+use lazy_static::lazy_static;
 use pam_sandboxed::{PamAuth, PamError};
 
 struct Timeouts {

@@ -5,11 +5,12 @@ use std::time::Duration;
 use futures::future::FutureExt;
 use webdav_handler::fs::*;
 use webdav_handler::localfs::LocalFs;
-use webdav_handler::webpath::WebPath;
+use webdav_handler::davpath::DavPath;
 
 use crate::cache;
 use crate::suid::UgidSwitch;
 use fs_quota::*;
+use lazy_static::lazy_static;
 
 lazy_static! {
     static ref QCACHE: cache::Cache<PathBuf, FsQuota> = cache::Cache::new().maxage(Duration::new(30, 0));
@@ -53,44 +54,44 @@ impl UserFs {
 }
 
 impl DavFileSystem for UserFs {
-    fn metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<dyn DavMetaData>> {
+    fn metadata<'a>(&'a self, path: &'a DavPath) -> FsFuture<Box<dyn DavMetaData>> {
         self.fs.metadata(path)
     }
 
-    fn symlink_metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<dyn DavMetaData>> {
+    fn symlink_metadata<'a>(&'a self, path: &'a DavPath) -> FsFuture<Box<dyn DavMetaData>> {
         self.fs.symlink_metadata(path)
     }
 
     fn read_dir<'a>(
         &'a self,
-        path: &'a WebPath,
+        path: &'a DavPath,
         meta: ReadDirMeta,
     ) -> FsFuture<FsStream<Box<dyn DavDirEntry>>>
     {
         self.fs.read_dir(path, meta)
     }
 
-    fn open<'a>(&'a self, path: &'a WebPath, options: OpenOptions) -> FsFuture<Box<dyn DavFile>> {
+    fn open<'a>(&'a self, path: &'a DavPath, options: OpenOptions) -> FsFuture<Box<dyn DavFile>> {
         self.fs.open(path, options)
     }
 
-    fn create_dir<'a>(&'a self, path: &'a WebPath) -> FsFuture<()> {
+    fn create_dir<'a>(&'a self, path: &'a DavPath) -> FsFuture<()> {
         self.fs.create_dir(path)
     }
 
-    fn remove_dir<'a>(&'a self, path: &'a WebPath) -> FsFuture<()> {
+    fn remove_dir<'a>(&'a self, path: &'a DavPath) -> FsFuture<()> {
         self.fs.remove_dir(path)
     }
 
-    fn remove_file<'a>(&'a self, path: &'a WebPath) -> FsFuture<()> {
+    fn remove_file<'a>(&'a self, path: &'a DavPath) -> FsFuture<()> {
         self.fs.remove_file(path)
     }
 
-    fn rename<'a>(&'a self, from: &'a WebPath, to: &'a WebPath) -> FsFuture<()> {
+    fn rename<'a>(&'a self, from: &'a DavPath, to: &'a DavPath) -> FsFuture<()> {
         self.fs.rename(from, to)
     }
 
-    fn copy<'a>(&'a self, from: &'a WebPath, to: &'a WebPath) -> FsFuture<()> {
+    fn copy<'a>(&'a self, from: &'a DavPath, to: &'a DavPath) -> FsFuture<()> {
         self.fs.copy(from, to)
     }
 

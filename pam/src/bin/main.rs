@@ -18,7 +18,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut pamauth = PamAuth::new(None)?;
 
-    let rt = tokio::runtime::Runtime::new()?;
+    let mut rt = tokio::runtime::Builder::new()
+        .enable_io()
+        .basic_scheduler()
+        .build()?;
+
     rt.block_on(async move {
         match pamauth.auth("other", &name, &pass, None).await {
             Ok(res) => println!("pam.auth returned Ok({:?})", res),

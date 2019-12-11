@@ -8,7 +8,7 @@ use std::path::Path;
 
 use futures::future::{self, FutureExt};
 use webdav_handler::fs::*;
-use webdav_handler::webpath::WebPath;
+use webdav_handler::davpath::DavPath;
 
 use crate::userfs::UserFs;
 
@@ -30,13 +30,13 @@ impl RootFs {
 
 impl DavFileSystem for RootFs {
     // Only allow "/" or "/user", for both return the metadata of the UserFs root.
-    fn metadata<'a>(&'a self, path: &'a WebPath) -> FsFuture<Box<dyn DavMetaData>> {
+    fn metadata<'a>(&'a self, path: &'a DavPath) -> FsFuture<Box<dyn DavMetaData>> {
         async move {
             let b = path.as_bytes();
             if b != b"/" && &b[1..] != self.user.as_bytes() {
                 return Err(FsError::NotFound);
             }
-            let path = WebPath::from_str("/", "").unwrap();
+            let path = DavPath::new("/").unwrap();
             self.fs.metadata(&path).await
         }
             .boxed()
@@ -45,7 +45,7 @@ impl DavFileSystem for RootFs {
     // Only return one entry: "user".
     fn read_dir<'a>(
         &'a self,
-        path: &'a WebPath,
+        path: &'a DavPath,
         _meta: ReadDirMeta,
     ) -> FsFuture<FsStream<Box<dyn DavDirEntry>>>
     {
@@ -67,7 +67,7 @@ impl DavFileSystem for RootFs {
     }
 
     // cannot open any files.
-    fn open(&self, _path: &WebPath, _options: OpenOptions) -> FsFuture<Box<dyn DavFile>> {
+    fn open(&self, _path: &DavPath, _options: OpenOptions) -> FsFuture<Box<dyn DavFile>> {
         Box::pin(future::ready(Err(FsError::NotImplemented)))
     }
 

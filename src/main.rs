@@ -12,41 +12,34 @@
 //!
 
 #[macro_use]
-extern crate clap;
-#[macro_use]
 extern crate log;
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate serde_derive;
 
 mod cache;
 mod cached;
 mod config;
 mod rootfs;
+#[doc(hidden)]
+pub mod router;
 mod suid;
 mod unixuser;
 mod userfs;
 
-use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::process::exit;
 use std::sync::Arc;
 
-use env_logger;
-use handlebars::Handlebars;
+use clap::clap_app;
 use headers::{authorization::Basic, Authorization, HeaderMapExt};
-use http;
 use http::status::StatusCode;
 use hyper::{self, server::conn::AddrStream, service::{service_fn, make_service_fn}};
-use net2;
-use tokio;
 
 use pam_sandboxed::PamAuth;
-use webdav_handler::{fakels::FakeLs, localfs::LocalFs, ls::DavLockSystem, memls::MemLs};
-use webdav_handler::{fs, fs::DavFileSystem, webpath::WebPath, DavConfig, DavHandler};
+use webdav_handler::{fakels::FakeLs, ls::DavLockSystem, fs::DavFileSystem};
+use webdav_handler::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
 
+use crate::config::{Auth, AuthType, AcctType, CaseInsensitive, Handler};
 use crate::rootfs::RootFs;
 use crate::suid::switch_ugid;
 use crate::userfs::UserFs;
@@ -58,11 +51,9 @@ static PROGNAME: &'static str = "webdav-server";
 struct Server {
     dh:         DavHandler,
     pam_auth:   PamAuth,
-    users_path: Arc<Option<String>>,
     config:     Arc<config::Config>,
 }
 
-#[allow(dead_code)]
 type HttpResult = Result<hyper::Response<webdav_handler::body::Body>, io::Error>;
 type HttpRequest = http::Request<hyper::Body>;
 
@@ -70,87 +61,31 @@ type HttpRequest = http::Request<hyper::Body>;
 impl Server {
     // Constructor.
     pub fn new(config: Arc<config::Config>, auth: PamAuth) -> Self {
-        // any locksystem?
-        let ls = match config.webdav.locksystem.as_str() {
-            "" | "fakels" => Some(FakeLs::new() as Box<dyn DavLockSystem>),
-            "memls" => Some(MemLs::new() as Box<dyn DavLockSystem>),
-            _ => None,
-        };
 
         // mostly empty handler.
-        let dh = DavHandler::new_with(DavConfig {
-            ls: ls,
-            ..DavConfig::default()
-        });
-
-        // base path of the users.
-        let users_path = match config.users {
-            Some(ref users) => {
-                if let Some(idx) = users.path.find("/:username") {
-                    let userbase = match &users.path[..idx] {
-                        "" => "/",
-                        x => x,
-                    };
-                    Some(String::from(userbase))
-                } else {
-                    None
-                }
-            },
-            None => None,
-        };
+        let ls = FakeLs::new() as Box<dyn DavLockSystem>;
+        let dh = DavHandler::builder().locksystem(ls).build_handler();
 
         Server {
             dh:         dh,
             pam_auth:   auth,
             config:     config,
-            users_path: Arc::new(users_path),
         }
-    }
-
-    // get the user path from config.users.path.
-    fn user_path(&self, user: &str) -> String {
-        match self.config.users {
-            Some(ref users) => {
-                // replace :user with the username.
-                users.path.replace(":username", user)
-            },
-            None => {
-                // something that can never match.
-                "-".to_string()
-            },
-        }
-    }
-
-    // check if this is the root filesystem.
-    fn is_realroot(&self, uri: &http::uri::Uri) -> Option<(WebPath, bool)> {
-        // is a rootfs configured?
-        let rootfs = match self.config.rootfs {
-            Some(ref rootfs) => rootfs,
-            None => return None,
-        };
-
-        // check prefix.
-        let webpath = match WebPath::from_uri(uri, &rootfs.path) {
-            Ok(path) => path,
-            Err(_) => return None,
-        };
-
-        // only files one level deep.
-        let nseg = webpath.num_segments();
-        if nseg > 1 || (nseg == 1 && webpath.is_collection()) {
-            return None;
-        }
-
-        Some((webpath, rootfs.auth))
     }
 
     // authenticate user.
     async fn auth<'a>(
         &'a self,
         req: &'a HttpRequest,
-        remote_ip: Option<&'a str>,
-    ) -> Result<Arc<unixuser::User>, StatusCode>
+        remote_ip: SocketAddr,
+    ) -> Result<String, StatusCode>
     {
+        // match the auth type (for now, only pam).
+        match self.config.accounts.auth_type {
+            Some(AuthType::Pam) => {},
+            None => return Err(StatusCode::UNAUTHORIZED),
+        }
+
         // we must have a login/pass
         let basic = match req.headers().typed_get::<Authorization<Basic>>() {
             Some(Authorization(basic)) => basic,
@@ -159,18 +94,58 @@ impl Server {
         let user = basic.username();
         let pass = basic.password();
 
+        // stringify the remote IP address.
+        let ip = remote_ip.ip();
+        let ip_string = if ip.is_loopback() {
+            // if it's loopback, take the value from the x-forwarded-for
+            // header, if present.
+            req.headers()
+                .get("x-forwarded-for")
+                .and_then(|s| s.to_str().ok())
+                .and_then(|s| s.split(',').next())
+                .map(|s| s.trim().to_owned())
+        } else {
+            Some(match ip {
+                IpAddr::V4(ip) => ip.to_string(),
+                IpAddr::V6(ip) => ip.to_string(),
+            })
+        };
+        let ip_ref = ip_string.as_ref().map(|s| s.as_str());
+
+        // authenticate.
+        let service = self.config.pam.service.as_str();
+        let pam_auth = self.pam_auth.clone();
+        match cached::pam_auth(pam_auth, service, user, pass, ip_ref).await {
+            Ok(_) => Ok(user.to_string()),
+            Err(_) => Err(StatusCode::UNAUTHORIZED),
+        }
+    }
+
+    // check user account.
+    async fn acct<'a>(
+        &'a self,
+        auth_user: Option<&'a String>,
+        user_param: Option<&'a str>,
+    ) -> Result<Option<Arc<unixuser::User>>, StatusCode>
+    {
+        // Get username - if any.
+        let user = match auth_user.map(|u| u.as_str()).or(user_param) {
+            Some(u) => u,
+            None => return Ok(None),
+        };
+
+        // For now, we only support unix accounts,
+        // so if another type is set - or none - we return NOT_FOUND.
+        match self.config.accounts.acct_type {
+            Some(AcctType::Unix) => {},
+            None => return Err(StatusCode::NOT_FOUND),
+        };
+
         // check if user exists.
         let pwd = match cached::unixuser(user).await {
             Ok(pwd) => pwd,
             Err(_) => return Err(StatusCode::UNAUTHORIZED),
         };
-
-        // authenticate.
-        let service = self.config.pam.service.as_str();
-        let pam_auth = self.pam_auth.clone();
-        if let Err(_) = cached::pam_auth(pam_auth, service, &pwd.name, pass, remote_ip).await {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
 
         // check minimum uid
         if let Some(min_uid) = self.config.unix.min_uid {
@@ -179,10 +154,10 @@ impl Server {
                     "Server::auth: {}: uid {} too low (<{})",
                     pwd.name, pwd.uid, min_uid
                 );
-                return Err(StatusCode::UNAUTHORIZED);
+                return Err(StatusCode::FORBIDDEN);
             }
         }
-        Ok(pwd)
+        Ok(Some(pwd))
     }
 
     // return a new response::Builder with the Server: header set.
@@ -196,7 +171,7 @@ impl Server {
             .map(|s| s.as_str())
             .unwrap_or("webdav-server-rs");
         if id != "" {
-            builder.header("Server", id);
+            builder = builder.header("Server", id);
         }
         builder
     }
@@ -222,86 +197,132 @@ impl Server {
         remote_ip: SocketAddr,
     ) -> HttpResult
     {
-        // stringify the remote IP address.
-        let ip = remote_ip.ip();
-        let ip_string = if ip.is_loopback() {
-            // if it's loopback, take the value from the x-forwarded-for
-            // header, if present.
-            req.headers()
-                .get("x-forwarded-for")
-                .and_then(|s| s.to_str().ok())
-                .and_then(|s| s.split(',').next())
-                .map(|s| s.trim().to_owned())
-        } else {
-            Some(match ip {
-                IpAddr::V4(ip) => ip.to_string(),
-                IpAddr::V6(ip) => ip.to_string(),
-            })
-        };
-        let ip_ref = ip_string.as_ref().map(|s| s.as_str());
-
-        // see if this is a request for the root filesystem.
-        let method = req.method();
-        if method == &http::Method::GET || method == &http::Method::HEAD {
-            if let Some((webpath, do_auth)) = self.is_realroot(req.uri()) {
-                debug!("handle: {:?}: handle as realroot", req.uri());
-                let user = if do_auth {
-                    match self.auth(&req, ip_ref).await {
-                        Ok(pwd) => Some(pwd.name.clone()),
-                        Err(status) => return self.error(status).await,
-                    }
-                } else {
-                    None
-                };
-                return self.handle_realroot(req, user, webpath).await;
-            }
-            debug!("handle: {:?}: not realroot", req.uri());
-        }
-
-        // Normalize the path.
-        let path = match WebPath::from_uri(req.uri(), "") {
-            Ok(path) => path.as_utf8_string_with_prefix(),
+        // Get the URI path.
+        let davpath = match DavPath::from_uri(req.uri()) {
+            Ok(p) => p,
             Err(_) => return self.error(StatusCode::BAD_REQUEST).await,
         };
+        let path = davpath.as_bytes();
 
-        // Could be a request for the virtual root.
-        if let Some(users_path) = self.users_path.as_ref() {
-            if is_virtroot(&path, users_path) {
-                let pwd = match self.auth(&req, ip_ref).await {
-                    Ok(pwd) => pwd,
-                    Err(status) => return self.error(status).await,
-                };
-                debug!("handle: {:?}: handle as virtualroot", req.uri());
-                return self.handle_virtualroot(req, pwd).await;
+        // Get the method.
+        let method = match DavMethod::try_from(req.method()) {
+            Ok(m) => m,
+            Err(_) => return self.error(http::StatusCode::METHOD_NOT_ALLOWED).await,
+        };
+
+        // Match route to a location.
+        let route = match self.config.router.matches(path, method, &["user", "path"]) {
+            mut rt if rt.len() > 0 => rt.remove(0),
+            _ => return self.error(StatusCode::NOT_FOUND).await,
+        };
+        let location = &self.config.location[*route.data];
+
+        // See if we matched a :user parameter
+        // If so, it must be valid UTF-8, or we return NOT_FOUND.
+        let user_param = match route.params[0].as_ref() {
+            Some(p) => match p.as_str() {
+                Some(p) => Some(p),
+                None => return self.error(StatusCode::NOT_FOUND).await,
+            },
+            None => None,
+        };
+
+        // Do authentication if needed.
+        let auth_hdr = req.headers().typed_get::<Authorization<Basic>>();
+        let do_auth = match location.auth {
+            Some(Auth::True) => true,
+            Some(Auth::Opportunistic) => auth_hdr.is_some(),
+            Some(Auth::False) | None => false,
+        };
+        let auth_user = if do_auth {
+            let user = match self.auth(&req, remote_ip).await {
+                Ok(user) => user,
+                Err(status) => return self.error(status).await,
+            };
+            // if there was a :user in the route, return error if it does not match.
+            if user_param.map(|u| u != &user).unwrap_or(false) {
+                return self.error(StatusCode::UNAUTHORIZED).await;
             }
-        }
+            Some(user)
+        } else {
+            None
+        };
 
-        // is this the users part of the path?
-        let prefix = self.user_path("");
-        if !path.starts_with(&prefix) {
-            debug!("handle: {}: doesn't match start with {}", path, prefix);
-            return self.error(StatusCode::NOT_FOUND).await;
-        }
-
-        // authenticate now.
-        let pwd = match self.auth(&req, ip_ref).await {
+        // Now see if we want to do a account lookup, for uid/gid/homedir.
+        let pwd = match self.acct(auth_user.as_ref(), user_param).await {
             Ok(pwd) => pwd,
             Err(status) => return self.error(status).await,
         };
 
-        // Check if username matches basedir.
-        let prefix = self.user_path(&pwd.name);
-        if !path.starts_with(&prefix) {
-            // in /<something>/ but doesn't match /:user/
-            debug!(
-                "Server::handle: user {} prefix {} path {} -> 401",
-                pwd.name, prefix, path
-            );
-            return self.error(StatusCode::UNAUTHORIZED).await;
+        // Expand "~" in the directory.
+        let dir = match expand_directory(location.directory.as_str(), pwd.as_ref()) {
+            Ok(d) => d,
+            Err(_) => return self.error(StatusCode::NOT_FOUND).await,
+        };
+
+        // If :path matched, we can calculate the prefix.
+        let prefix = match route.params[1].as_ref() {
+            Some(p) => {
+                let mut start = p.start();
+                if start > 0 {
+                    start -= 1;
+                }
+                match std::str::from_utf8(&path[..start]) {
+                    Ok(p) => p.to_string(),
+                    Err(_) => return self.error(StatusCode::NOT_FOUND).await,
+                }
+            },
+            None => String::from(""),
+        };
+
+        // Get User-Agent for user-agent specific modes.
+        let user_agent = req
+            .headers()
+            .get("user-agent")
+            .and_then(|s| s.to_str().ok())
+            .unwrap_or("");
+
+        // Case insensitivity wanted?
+        let case_insensitive = match location.case_insensitive {
+            Some(CaseInsensitive::True) => true,
+            Some(CaseInsensitive::Ms) => user_agent.contains("Microsoft"),
+            Some(CaseInsensitive::False) | None => false,
+        };
+
+        // macOS optimizations?
+        let macos = user_agent.contains("WebDAVFS/") && user_agent.contains("Darwin");
+
+        // Get the filesystem.
+        let auth_ugid = if location.setuid { pwd.as_ref().map(|p| (p.uid, p.gid)) } else { None };
+        let fs = match location.handler {
+            Handler::Virtroot => {
+                let auth_user = auth_user.as_ref().map(String::as_str).unwrap_or("UNKNOWN").to_string();
+                RootFs::new(dir, auth_user, auth_ugid) as Box<dyn DavFileSystem>
+            },
+            Handler::Filesystem => {
+                UserFs::new(dir, auth_ugid, true, case_insensitive, macos) as Box<dyn DavFileSystem>
+            }
+        };
+
+        // Build a handler.
+        let methods = location.methods.unwrap_or(DavMethodSet::from_vec(vec!["GET"]).unwrap());
+        let hide_symlinks = location.hide_symlinks.clone().unwrap_or(true);
+
+        let mut config = DavConfig::new()
+            .filesystem(fs)
+            .strip_prefix(prefix)
+            .methods(methods)
+            .hide_symlinks(hide_symlinks)
+            .autoindex(location.autoindex);
+        if let Some(auth_user) = auth_user {
+            config = config.principal(auth_user);
+        }
+        if let Some(indexfile) = location.indexfile.clone() {
+            config = config.indexfile(indexfile);
         }
 
         // All set.
-        self.handle_user(req, prefix, pwd).await
+        self.run_davhandler(config, req).await
     }
 
     async fn error(&self, code: StatusCode) -> HttpResult {
@@ -310,9 +331,9 @@ impl Server {
             code.as_u16(),
             code.canonical_reason().unwrap_or("")
         );
-        let mut response = self.response_builder();
-        response.status(code);
-        response.header("Content-Type", "text/xml");
+        let mut response = self.response_builder()
+            .status(code)
+            .header("Content-Type", "text/xml");
         if code == StatusCode::UNAUTHORIZED {
             let realm = self
                 .config
@@ -321,201 +342,9 @@ impl Server {
                 .as_ref()
                 .map(|s| s.as_str())
                 .unwrap_or("Webdav Server");
-            response.header("WWW-Authenticate", format!("Basic realm=\"{}\"", realm).as_str());
+            response = response.header("WWW-Authenticate", format!("Basic realm=\"{}\"", realm).as_str());
         }
         Ok(response.body(msg.into()).unwrap())
-    }
-
-    async fn redirect(&self, path: String) -> HttpResult {
-        let resp = self
-            .response_builder()
-            .status(302)
-            .header("content-type", "text/plain")
-            .header("location", path)
-            .body("302 Moved\n".into())
-            .unwrap();
-        Ok(resp)
-    }
-
-    // serve from the local filesystem.
-    async fn handle_realroot(
-        &self,
-        req: HttpRequest,
-        user: Option<String>,
-        webpath: WebPath,
-    ) -> HttpResult
-    {
-        // get filename.
-        let mut webpath = webpath;
-        let mut filename = match std::str::from_utf8(webpath.file_name()) {
-            Ok(n) => n,
-            Err(_) => return self.error(StatusCode::NOT_FOUND).await,
-        };
-
-        let rootfs = self.config.rootfs.as_ref().unwrap();
-        debug!("Server::handle_realroot: serving {:?}", req.uri());
-
-        // index.html?
-        let mut req = req;
-        if filename == "" {
-            let index = rootfs.index.as_ref().map(|s| s.as_str()).unwrap_or("index.html");
-            filename = index;
-            webpath.push_segment(index.as_bytes());
-            let path = webpath.as_url_string_with_prefix();
-            if let Ok(pq) = http::uri::PathAndQuery::from_shared(path.into()) {
-                let mut parts = req.uri().clone().into_parts();
-                parts.path_and_query = Some(pq);
-                *req.uri_mut() = http::uri::Uri::from_parts(parts).unwrap();
-            }
-        }
-
-        // see if file exists.
-        let fs: Box<dyn DavFileSystem> = LocalFs::new(&rootfs.directory, true, false, false);
-        if fs.metadata(&webpath).await.is_err() {
-            if let Some(users_path) = self.users_path.as_ref() {
-                if users_path == &rootfs.path {
-                    // file doesn't exist and we share the path with the users path.
-                    // if it matches a valid username, redirect.
-                    if cached::unixuser(&filename).await.is_ok() {
-                        debug!("Server::handle_realroot: redirect to /{}/", filename);
-                        let mut p = WebPath::from_str(&rootfs.path, "").unwrap();
-                        p.push_segment(filename.as_bytes());
-                        p.add_slash();
-                        return self.redirect(p.as_utf8_string_with_prefix()).await;
-                    }
-                }
-            }
-            return self.error(StatusCode::NOT_FOUND).await;
-        }
-
-        // Might be handlebars.
-        if filename.ends_with(".hbs") {
-            return self.render_hbs(req, fs, webpath, user).await;
-        }
-
-        // serve.
-        let config = DavConfig {
-            fs: Some(fs),
-            ..DavConfig::default()
-        };
-        self.run_davhandler(config, req).await
-    }
-
-    // handlebars support.
-    async fn render_hbs(
-        &self,
-        req: HttpRequest,
-        mut fs: Box<dyn DavFileSystem>,
-        webpath: WebPath,
-        user: Option<String>,
-    ) -> HttpResult
-    {
-        let filename = std::str::from_utf8(webpath.file_name()).unwrap();
-        debug!("Server::render_hbs {}", filename);
-        let indata = match read_file(&mut fs, &webpath).await {
-            Ok(data) => data,
-            Err(e) => {
-                debug!("render_hbs: {}: {:?}", filename, e);
-                return self.error(StatusCode::INTERNAL_SERVER_ERROR).await;
-            },
-        };
-        let hbs = Handlebars::new();
-        let mut vars = HashMap::new();
-        let h = req
-            .headers()
-            .get("host")
-            .and_then(|s| s.to_str().ok())
-            .map(|s| s.to_owned());
-        if let Some(host) = h {
-            vars.insert("hostname", host.to_string());
-        }
-        if let Some(user) = user {
-            vars.insert("username", user);
-        }
-        let outdata = match hbs.render_template(&indata, &vars) {
-            Ok(data) => data,
-            Err(e) => {
-                debug!("handle_realroot: {}: render template: {:?}", filename, e);
-                return self.error(StatusCode::INTERNAL_SERVER_ERROR).await;
-            },
-        };
-        self.response_builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/html")
-            .body(outdata.into())
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-    }
-
-    // virtual root filesytem for PROPFIND/OPTIONS in "/".
-    async fn handle_virtualroot(
-        &self,
-        req: HttpRequest,
-        pwd: Arc<unixuser::User>,
-    ) -> HttpResult
-    {
-        debug!("Server::handle_virtualroot: /");
-        let ugid = match self.config.accounts.setuid {
-            true => Some((pwd.uid, pwd.gid)),
-            false => None,
-        };
-        let user = pwd.name.clone();
-
-        let mut methods = webdav_handler::AllowedMethods::none();
-        methods.add(webdav_handler::Method::Head);
-        methods.add(webdav_handler::Method::Get);
-        methods.add(webdav_handler::Method::PropFind);
-        methods.add(webdav_handler::Method::Options);
-
-        let prefix = self.users_path.as_ref().clone().unwrap();
-
-        let fs = RootFs::new(&pwd.dir, user.clone(), ugid);
-        let config = DavConfig {
-            fs: Some(fs),
-            prefix: Some(prefix),
-            principal: Some(user),
-            allow: Some(methods),
-            ..DavConfig::default()
-        };
-        self.run_davhandler(config, req).await
-    }
-
-    async fn handle_user(
-        &self,
-        req: HttpRequest,
-        prefix: String,
-        pwd: Arc<unixuser::User>,
-    ) -> HttpResult
-    {
-        // do we have a users section?
-        let users = match self.config.users {
-            Some(ref users) => users,
-            None => return self.error(StatusCode::NOT_FOUND).await,
-        };
-
-        let ugid = match self.config.accounts.setuid {
-            true => Some((pwd.uid, pwd.gid)),
-            false => None,
-        };
-
-        let user_agent = req
-            .headers()
-            .get("user-agent")
-            .and_then(|s| s.to_str().ok())
-            .unwrap_or("");
-        let case_insensitive = users.ms_case_insensitive && user_agent.contains("Microsoft");
-        let macos = user_agent.contains("WebDAVFS/") && user_agent.contains("Darwin");
-
-        let fs = UserFs::new(&pwd.dir, ugid, true, case_insensitive, macos);
-
-        debug!("Server::handle_user: in userdir {} prefix {} ", pwd.name, prefix);
-        let config = DavConfig {
-            prefix: Some(prefix),
-            fs: Some(fs),
-            principal: Some(pwd.name.to_string()),
-            hide_symlinks: users.hide_symlinks,
-            ..DavConfig::default()
-        };
-        self.run_davhandler(config, req).await
     }
 
     // Call the davhandler, then add headers to the response.
@@ -540,10 +369,9 @@ impl Server {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // command line option processing.
     let matches = clap_app!(webdav_server =>
-        (version: "0.1")
+        (version: "0.3")
         (@arg CFG: -c --config +takes_value "configuration file (/etc/webdav-server.toml)")
         (@arg PORT: -p --port +takes_value "listen to this port on localhost only")
-        (@arg DIR: -d --dir +takes_value "override local directory to serve")
         (@arg DBG: -D --debug "enable debug level logging")
     )
     .get_matches();
@@ -556,7 +384,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         env_logger::init();
     }
 
-    let dir = matches.value_of("DIR");
     let port = matches.value_of("PORT");
     let cfg = matches.value_of("CFG").unwrap_or("/etc/webdav-server.toml");
 
@@ -570,14 +397,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     config::check(cfg.clone(), &config);
 
-    // override parts of the config with command line options.
-    if let Some(dir) = dir {
-        if config.rootfs.is_none() {
-            eprintln!("{}: [rootfs] section missing", cfg);
-            exit(1);
-        }
-        config.rootfs.as_mut().unwrap().directory = dir.to_owned();
+    // build routes.
+    if let Err(e) = config::build_routes(cfg.clone(), &mut config) {
+        eprintln!("{}: {}: {}", PROGNAME, cfg, e);
+        exit(1);
     }
+
     if let Some(port) = port {
         let localhosts = vec![
             ("127.0.0.1:".to_string() + port).parse::<SocketAddr>().unwrap(),
@@ -649,44 +474,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // start tokio runtime, run all servers, and wait for them to finish.
-    let rt = tokio::runtime::Runtime::new()?;
+    let mut rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
+        let mut tasks = Vec::new();
         for server in servers.drain(..) {
-            let _ = tokio::spawn(server);
+            tasks.push(tokio::spawn(server));
+        }
+        for task in tasks.drain(..) {
+            let _ = task.await;
         }
     });
-    rt.shutdown_on_idle();
 
     Ok(())
 }
 
-// Is this a file that belongs on the root filesystem?
-// (whether it exists or not)
-fn is_virtroot(path: &str, users_path: &str) -> bool {
-
-    // strip users_path prefix.
-    if !path.starts_with(users_path) {
-        return false;
+fn expand_directory(dir: &str, pwd: Option<&Arc<unixuser::User>>) -> Result<String, StatusCode> {
+    // If it doesn't start with "~", skip.
+    if !dir.starts_with("~") {
+        return Ok(dir.to_string());
     }
-    let p = path[users_path.len()..].trim_start_matches('/');
-
-    // more than one level deep, not the root fs.
-    if p.contains('/') {
-        return false;
+    // ~whatever doesn't work.
+    if dir.len() > 1 && !dir.starts_with("~/") {
+        return Err(StatusCode::NOT_FOUND);
     }
-
-    // only send this to the virtual root fs handler if
-    // we know this file - either root itself, or one of the
-    // special files windows/macos/linux probes for.
-    //
-    // otherwise it could still be a username.
-    p == "" ||
-        p.contains(char::is_uppercase) ||
-        p.starts_with(".") ||
-        p == "internal.dat" ||
-        p == "fakehome.dat" ||
-        p == "loopdir" ||
-        p == "index.html"
+    // must have a directory, and that dir must be UTF-8.
+    let pwd = pwd.ok_or(StatusCode::NOT_FOUND)?;
+    let homedir = pwd.dir.to_str().ok_or(StatusCode::NOT_FOUND)?;
+    Ok(format!("{}/{}", homedir, &dir[1..]))
 }
 
 // Make a new TcpListener, and if it's a V6 listener, set the
@@ -702,29 +516,4 @@ fn make_listener(addr: &SocketAddr) -> io::Result<std::net::TcpListener> {
     s.reuse_address(true)?;
     s.bind(addr)?;
     s.listen(128)
-}
-
-async fn read_file<'a>(
-    fs: &'a mut Box<dyn DavFileSystem>,
-    webpath: &'a WebPath,
-) -> fs::FsResult<String>
-{
-    let oo = fs::OpenOptions {
-        read: true,
-        ..fs::OpenOptions::default()
-    };
-    let mut file = fs.open(webpath, oo).await?;
-    let mut buffer = [0; 8192];
-    let mut data = Vec::new();
-    loop {
-        let n = file.read_bytes(&mut buffer[..]).await?;
-        if n == 0 {
-            break;
-        }
-        data.extend_from_slice(&buffer[..n]);
-    }
-    match String::from_utf8(data) {
-        Ok(s) => Ok(s),
-        Err(_) => Err(fs::FsError::GeneralFailure),
-    }
 }

@@ -2,21 +2,20 @@
 //
 // All the futures based code lives here.
 //
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::default::Default;
-use std::future::Future;
 use std::io;
-use std::pin::Pin;
+use std::os::unix::net::UnixStream as StdUnixStream;
 use std::sync::{Arc, Mutex, Once};
 
-use futures::prelude::*;
 use futures::channel::{mpsc, oneshot};
+use futures::{sink::SinkExt, stream::StreamExt};
 use futures::join;
 
-use tokio::prelude::*;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tokio::net::unix::split::WriteHalf as UnixWriteHalf;
-use tokio::net::unix::split::ReadHalf as UnixReadHalf;
+use tokio::net::unix::WriteHalf as UnixWriteHalf;
+use tokio::net::unix::ReadHalf as UnixReadHalf;
 
 use crate::pam::{PamError, ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER};
 use crate::pamserver::{PamResponse, PamServer};
@@ -40,16 +39,19 @@ struct PamRequest1 {
 /// Pam authenticator.
 #[derive(Clone)]
 pub struct PamAuth {
-    req_chan:   mpsc::Sender<PamRequest1>,
-    task_once:  Arc<PamAuthTaskOnce>,
+    inner:  Arc<PamAuthInner>,
 }
 
-struct PamAuthTaskOnce {
-    once:   Once,
-    task:   Mutex<Option<PamAuthTask>>,
+struct PamAuthInner {
+    once:       Once,
+    serversock: RefCell<Option<StdUnixStream>>,
+    req_chan:   RefCell<Option<mpsc::Sender<PamRequest1>>>,
 }
 
-type PamAuthTask = Pin<Box<dyn Future<Output = io::Result<()>> + Send + 'static>>;
+// Mutation of PamAuthInner only happens once,
+// protected by atomic Once, so this is safe.
+unsafe impl Sync for PamAuthInner {}
+unsafe impl Send for PamAuthInner {}
 
 impl PamAuth {
     /// Create a new PAM authenticator. This will start a new PAM server process
@@ -77,14 +79,15 @@ impl PamAuth {
     /// ```
     ///
     pub fn new(num_threads: Option<usize>) -> Result<PamAuth, io::Error> {
-        let (req_chan, task) = PamAuthTaskBg::start(num_threads)?;
-        Ok(PamAuth {
-            req_chan,
-            task_once: Arc::new(PamAuthTaskOnce{
-                once:   Once::new(),
-                task:   Mutex::new(Some(task)),
-            }),
-        })
+        // spawn the server process.
+        let serversock = PamServer::start(num_threads)?;
+
+        let inner = PamAuthInner{
+            once:       Once::new(),
+            req_chan:   RefCell::new(None),
+            serversock: RefCell::new(Some(serversock)),
+        };
+        Ok(PamAuth { inner: Arc::new(inner) })
     }
 
     /// Authenticate via pam and return the result.
@@ -101,17 +104,13 @@ impl PamAuth {
         remoteip: Option<&str>,
     ) -> Result<(), PamError>
     {
-        // if we haven't started the background task yet, do it now.
-        self.task_once.once.call_once(|| {
-            let mut opt = self.task_once.task.lock().unwrap();
-            let task = opt.take().unwrap();
-            debug!("PamAuthTask: spawning task on runtime");
-            tokio::spawn(async move {
-                match task.await {
-                    Ok(_) => debug!("PamAuthTask is done."),
-                    Err(_e) => debug!("PamAuthTask future returned error: {}", _e),
-                }
-            });
+        // If we haven't started the background task yet, do it now.
+        // That also initializes req_chan.
+        let inner = &self.inner;
+        inner.once.call_once(|| {
+            // These should not ever panic on unwrap().
+            let serversock = inner.serversock.borrow_mut().take().unwrap();
+            inner.req_chan.replace(Some(PamAuthTask::start(serversock).unwrap()));
         });
 
         // create request to be sent to the server.
@@ -131,7 +130,8 @@ impl PamAuth {
             req:       req,
             resp_chan: tx,
         };
-        self.req_chan.clone().send(req1).await.map_err(|_| PamError(ERR_SEND_TO_SERVER))?;
+        let mut authtask_chan = inner.req_chan.borrow().as_ref().unwrap().clone();
+        authtask_chan.send(req1).await.map_err(|_| PamError(ERR_SEND_TO_SERVER))?;
 
         // wait for the response.
         match rx.await {
@@ -141,40 +141,36 @@ impl PamAuth {
     }
 }
 
-// Shared data for the PamAuthTaskBg tasks.
-struct PamAuthTaskBg {
+// Shared data for the PamAuthTask tasks.
+struct PamAuthTask {
     // clients waiting for a response.
     waiters: Mutex<HashMap<u64, oneshot::Sender<Result<(), PamError>>>>,
 }
 
-impl PamAuthTaskBg {
+impl PamAuthTask {
 
     // Start the server process. Then return a handle to send requests on.
-    fn start(num_threads: Option<usize>) -> io::Result<(mpsc::Sender<PamRequest1>, PamAuthTask)> {
-        // spawn the server process.
-        let serversock = PamServer::start(num_threads)?;
+    fn start(serversock: StdUnixStream) -> io::Result<mpsc::Sender<PamRequest1>> {
 
-        // transform standard unixstream to tokio version.
-        let handle = tokio_net::driver::Handle::default();
-        let mut serversock = UnixStream::from_std(serversock, &handle)?;
+        let mut serversock = UnixStream::from_std(serversock)?;
 
         // create a request channel.
         let (req_tx, req_rx) = mpsc::channel::<PamRequest1>(0);
 
         // shared state between request and response task.
-        let this = PamAuthTaskBg{
+        let this = PamAuthTask{
             waiters: Mutex::new(HashMap::new()),
         };
 
-        let task = Box::pin(async move {
+        debug!("PamAuthTask: spawning task on runtime");
+        tokio::spawn(async move {
             // split serversock into send/receive halves.
             let (srx, stx) = serversock.split();
 
             join!(this.handle_request(req_rx, stx), this.handle_response(srx));
-            Ok(())
         });
 
-        Ok((req_tx, task))
+        Ok(req_tx)
     }
 
     async fn handle_request(&self, mut req_rx: mpsc::Receiver<PamRequest1>, mut stx: UnixWriteHalf<'_>) {
