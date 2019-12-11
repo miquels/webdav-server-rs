@@ -40,9 +40,9 @@ pub struct Server {
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct Accounts {
     #[serde(rename = "auth-type", deserialize_with = "deserialize_opt_enum", default)]
-    pub acct_type: Option<AcctType>,
-    #[serde(rename = "auth-type", deserialize_with = "deserialize_opt_enum", default)]
     pub auth_type: Option<AuthType>,
+    #[serde(rename = "acct-type", deserialize_with = "deserialize_opt_enum", default)]
+    pub acct_type: Option<AcctType>,
     #[serde(default)]
     pub realm: Option<String>,
 }
@@ -88,6 +88,8 @@ pub struct Location {
         default
     )]
     pub case_insensitive: Option<CaseInsensitive>,
+    #[serde(deserialize_with = "deserialize_opt_enum", default)]
+    pub on_notfound: Option<OnNotfound>,
 }
 
 #[derive(FromStr, Debug, Clone, Copy)]
@@ -128,6 +130,14 @@ pub enum CaseInsensitive {
     Ms,
     #[from_str = "false"]
     False,
+}
+
+#[derive(FromStr, Debug, Clone, Copy)]
+pub enum OnNotfound {
+    #[from_str = "continue"]
+    Continue,
+    #[from_str = "return"]
+    Return,
 }
 
 #[derive(Deserialize, Debug, Clone)]

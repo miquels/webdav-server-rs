@@ -16,28 +16,19 @@
 # User settings.
 #
 [accounts]
-  # which accounts are defined.
-  acct-type = "unix"
-  # how to authenticate.
+  # how to authenticate (default: unset).
   auth-type = "pam"
-  # do we run setuid if authenticated (default: false).
-  setuid = true
+  # what account "database" to use (default: unset).
+  acct-type = "unix"
   # realm to use with basic authentication (default: "Webdav Server").
   realm = "Webdav Server"
-
-#
-# Webdav protocol settings.
-#
-[webdav]
-  # locksystem can be "fakels" (default), "memls" or "none".
-  locksystem = "fakels"
 
 #
 # PAM authentication settings.
 #
 [pam]
   # PAM service to use.
-  service = "webdav"
+  service = "other"
   # Cache timeout (secs). 0 disables the cache (default: 120).
   cache-timeout = 120
   # Number of thread to use for the PAM service threadpool (default: 8).
@@ -53,44 +44,71 @@
   min-uid = 1000
 
 #
-# Root filesystem.
+# Below follows a list of locations. For every request, the "path"
+# and "methods" settings of each location are checked in the same order
+# as they appear in this file. The first one that matches, is used.
 #
-# This serves an index.html to GET/HEAD "/" requests from browsers.
-# It also serves any other files present in the directory.
-#
-# If "auth" is set, browser clients must authenticate to see the content.
-#
-[rootfs]
-  # URL path to this directory.
-  path = "/"
-  # Directory to serve.
-  directory = "/var/www/html"
-  # Index file (default: "index.html").
-  index = "index.html"
-  # Client must authenticate (default: false).
-  auth = false
 
-#
-# Users.
-#
-# To access this part of the server namespace, the client must be
-# authenticated. Then full read/write access is allowed in the
-# clients directory on files owned by the uid/gid the server is
-# running under - if accounts.setuid is true, that is the users
-# uid/gid, otherwise it's the global server uid/gid.
-#
-[users]
-  # Path. If this contains ":username", then that part of the path
-  # must match the username. Most common setting here is "/:username".
-  # In that case, a request for the path _without_ ":username" will
-  # result in a virtual directory containing 1 item, the username
-  # sent by the client.
-  path = "/:username"
-  # Hide symbolic links (default: true)
-  hide_symlinks = true
-  # If this is set *and* the User-Agent header contains "Microsoft",
-  # filesystem lookup will be case insensitive. Note that this has
-  # a *lot* of overhead (potentially a readdir on every segment
-  # of the path!) (default: false).
-  ms_case_insensitive = false
+##
+## Example location. Lists all the defaults.
+##
+[[location]]
+  # Matching route(s) to the resource.
+  # :path is the part of the path to map to the filesystem
+  # :user matches the currently authenticated user.
+  #
+  # For authenticated webdav sessions, /:user/*path is common.
+  #
+  # If there is no route defined, the location is ignored.
+  #route = [ "/" ]
+
+  # Allowed methods.
+  # List of individual methods, or one of:
+  # http-ro: GET, HEAD
+  # http-rw: GET, HEAD, PUT
+  # webdav-ro: GET, HEAD, OPTIONS, PROPFIND
+  # webdav-rw: GET, HEAD, OPTIONS, PROPFIND, PUT, PATCH, PROPFIND,
+  #            PROPPATCH, MKCOL, COPY, MOVE, DELETE, LOCK, UNLOCK
+  methods = [ "http-ro" ]
+
+  # Authenticate? true, false, optional, write.
+  # "optional": means "if you send an Authorization: header, we'll check it".
+  # "write": means "for methods not in webdav-ro".
+  auth = "false"
+
+  # Type of handler: filesystem, virtroot. Mandatory.
+  #
+  # The filesystem handler is what you would expect.
+  #
+  # The virtroot handler is a special handler for PROPFIND requests on
+  # authenticated sessions, i.e. where we have a username. It is useful
+  # when you have your webdav clients all under, say, /:user/*path.
+  # In that case, normally a PROPFIND of "/" would return either NOT_FOUND
+  # or the contents of the directory of some [[location]]. If the handler
+  # is set to "virtroot", a PROPFIND will list exactly one subdirectory,
+  # with the name of the authenticated user.
+  #
+  handler = "filesystem"
+
+  # what to do on 404 Not Found: continue, return (default: return).
+  on_notfound = "return"
+
+  # Change UID/GID to that of the authenticated user: true, false.
+  setuid = false
+
+  # Directory to serve. Mandatory.
+  directory = "/var/www/html"
+
+  # Index file to serve when you GET a directory (if it exists) (default: none).
+  #indexfile = "index.html"
+
+  # Serve HTML directory indexes: true, false (default: false).
+  autoindex = false
+
+  # webdav PROPFIND: hide symbolic links: true, false (default: true).
+  hide-symlinks = true
+
+  # case insensitive lookups: true, false, ms.
+  # "ms" means "for Microsoft clients".
+  case-insensitive = "false"
 

@@ -43,8 +43,9 @@ use pam_sandboxed::PamAuth;
 use webdav_handler::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
 use webdav_handler::{fakels::FakeLs, fs::DavFileSystem, ls::DavLockSystem};
 
-use crate::config::{AcctType, Auth, AuthType, CaseInsensitive, Handler};
+use crate::config::{AcctType, Auth, AuthType, CaseInsensitive, Handler, Location, OnNotfound};
 use crate::rootfs::RootFs;
+use crate::router::MatchedRoute;
 use crate::suid::switch_ugid;
 use crate::userfs::UserFs;
 
@@ -189,7 +190,7 @@ impl Server {
     }
 
     // handle a request.
-    async fn handle(&self, req: HttpRequest, remote_ip: SocketAddr) -> HttpResult {
+    async fn route(&self, req: HttpRequest, remote_ip: SocketAddr) -> HttpResult {
         // Get the URI path.
         let davpath = match DavPath::from_uri(req.uri()) {
             Ok(p) => p,
@@ -203,13 +204,47 @@ impl Server {
             Err(_) => return self.error(http::StatusCode::METHOD_NOT_ALLOWED).await,
         };
 
-        // Match route to a location.
-        let route = match self.config.router.matches(path, method, &["user", "path"]) {
-            mut rt if rt.len() > 0 => rt.remove(0),
-            _ => return self.error(StatusCode::NOT_FOUND).await,
-        };
-        let location = &self.config.location[*route.data];
+        // Request is stored here.
+        let mut reqdata = Some(req);
 
+        // Match routes to one or more locations.
+        for route in self
+            .config
+            .router
+            .matches(path, method, &["user", "path"])
+            .drain(..)
+        {
+            // Take the request from the option.
+            let req = reqdata.take().unwrap();
+
+            // if we might continue, store a clone of the request for the next round.
+            let location = &self.config.location[*route.data];
+            if let Some(OnNotfound::Continue) = location.on_notfound {
+                reqdata.get_or_insert(clone_httpreq(&req));
+            }
+
+            // handle request.
+            let res = self.handle(req, path, route, location, remote_ip.clone()).await?;
+
+            // no on_notfound? then this is final.
+            if reqdata.is_none() || res.status() != StatusCode::NOT_FOUND {
+                return Ok(res);
+            }
+        }
+
+        self.error(StatusCode::NOT_FOUND).await
+    }
+
+    // handle a request.
+    async fn handle<'a, 't: 'a, 'p: 'a>(
+        &'a self,
+        req: HttpRequest,
+        path: &'a [u8],
+        route: MatchedRoute<'t, 'p, usize>,
+        location: &'a Location,
+        remote_ip: SocketAddr,
+    ) -> HttpResult
+    {
         // See if we matched a :user parameter
         // If so, it must be valid UTF-8, or we return NOT_FOUND.
         let user_param = match route.params[0].as_ref() {
@@ -450,7 +485,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             async move {
                 let func = move |req| {
                     let dav_server = dav_server.clone();
-                    async move { dav_server.handle(req, remote_addr).await }
+                    async move { dav_server.route(req, remote_addr).await }
                 };
                 Ok::<_, hyper::Error>(service_fn(func))
             }
@@ -485,6 +520,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     Ok(())
+}
+
+// Clones a http request with an empty body.
+fn clone_httpreq(req: &HttpRequest) -> HttpRequest {
+    let mut builder = http::Request::builder()
+        .method(req.method().clone())
+        .uri(req.uri().clone())
+        .version(req.version().clone());
+    for (name, value) in req.headers().iter() {
+        builder = builder.header(name, value);
+    }
+    builder.body(hyper::Body::empty()).unwrap()
 }
 
 fn expand_directory(dir: &str, pwd: Option<&Arc<unixuser::User>>) -> Result<String, StatusCode> {
