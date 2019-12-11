@@ -1,7 +1,7 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 
-use crate::{FsQuota, FqError, Mtab};
+use crate::{FqError, FsQuota, Mtab};
 
 extern "C" {
     fn fs_quota_nfs(
@@ -33,7 +33,6 @@ fn clnt_sperrno(e: c_int) -> &'static str {
 }
 
 pub(crate) fn get_quota(entry: &Mtab, uid: u32) -> Result<FsQuota, FqError> {
-
     let host = CString::new(entry.host.as_ref().unwrap().as_bytes())?;
     let path = CString::new(entry.device.as_bytes())?;
     let fstype = CString::new(entry.fstype.as_bytes())?;
@@ -79,7 +78,7 @@ pub(crate) fn get_quota(entry: &Mtab, uid: u32) -> Result<FsQuota, FqError> {
         e => {
             debug!("nfs: unknown error {}", e);
             return Err(FqError::Other);
-        }
+        },
     }
 
     let m = |v| if v == 0xffffffffffffffff { None } else { Some(v) };
@@ -91,4 +90,3 @@ pub(crate) fn get_quota(entry: &Mtab, uid: u32) -> Result<FsQuota, FqError> {
     };
     return Ok(res);
 }
-

@@ -30,7 +30,6 @@ fn run_rpcgen() {
 }
 
 fn main() {
-
     #[cfg(feature = "nfs")]
     run_rpcgen();
 
@@ -41,9 +40,7 @@ fn main() {
 
     #[cfg(feature = "nfs")]
     {
-        builder
-            .file("src/quota-nfs.c")
-            .file("src/rquota_xdr.c");
+        builder.file("src/quota-nfs.c").file("src/rquota_xdr.c");
     }
     builder
         .flag_if_supported("-Wno-unused-variable")
@@ -60,4 +57,3 @@ fn main() {
         println!("cargo:rerun-if-changed=src/quota-nfs.c");
     }
 }
-

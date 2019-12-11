@@ -9,13 +9,13 @@ use std::os::unix::net::UnixStream as StdUnixStream;
 use std::sync::{Arc, Mutex, Once};
 
 use futures::channel::{mpsc, oneshot};
-use futures::{sink::SinkExt, stream::StreamExt};
 use futures::join;
+use futures::{sink::SinkExt, stream::StreamExt};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixStream;
-use tokio::net::unix::WriteHalf as UnixWriteHalf;
 use tokio::net::unix::ReadHalf as UnixReadHalf;
+use tokio::net::unix::WriteHalf as UnixWriteHalf;
+use tokio::net::UnixStream;
 
 use crate::pam::{PamError, ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER};
 use crate::pamserver::{PamResponse, PamServer};
@@ -39,7 +39,7 @@ struct PamRequest1 {
 /// Pam authenticator.
 #[derive(Clone)]
 pub struct PamAuth {
-    inner:  Arc<PamAuthInner>,
+    inner: Arc<PamAuthInner>,
 }
 
 struct PamAuthInner {
@@ -82,12 +82,14 @@ impl PamAuth {
         // spawn the server process.
         let serversock = PamServer::start(num_threads)?;
 
-        let inner = PamAuthInner{
+        let inner = PamAuthInner {
             once:       Once::new(),
             req_chan:   RefCell::new(None),
             serversock: RefCell::new(Some(serversock)),
         };
-        Ok(PamAuth { inner: Arc::new(inner) })
+        Ok(PamAuth {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Authenticate via pam and return the result.
@@ -110,7 +112,9 @@ impl PamAuth {
         inner.once.call_once(|| {
             // These should not ever panic on unwrap().
             let serversock = inner.serversock.borrow_mut().take().unwrap();
-            inner.req_chan.replace(Some(PamAuthTask::start(serversock).unwrap()));
+            inner
+                .req_chan
+                .replace(Some(PamAuthTask::start(serversock).unwrap()));
         });
 
         // create request to be sent to the server.
@@ -131,7 +135,10 @@ impl PamAuth {
             resp_chan: tx,
         };
         let mut authtask_chan = inner.req_chan.borrow().as_ref().unwrap().clone();
-        authtask_chan.send(req1).await.map_err(|_| PamError(ERR_SEND_TO_SERVER))?;
+        authtask_chan
+            .send(req1)
+            .await
+            .map_err(|_| PamError(ERR_SEND_TO_SERVER))?;
 
         // wait for the response.
         match rx.await {
@@ -148,17 +155,15 @@ struct PamAuthTask {
 }
 
 impl PamAuthTask {
-
     // Start the server process. Then return a handle to send requests on.
     fn start(serversock: StdUnixStream) -> io::Result<mpsc::Sender<PamRequest1>> {
-
         let mut serversock = UnixStream::from_std(serversock)?;
 
         // create a request channel.
         let (req_tx, req_rx) = mpsc::channel::<PamRequest1>(0);
 
         // shared state between request and response task.
-        let this = PamAuthTask{
+        let this = PamAuthTask {
             waiters: Mutex::new(HashMap::new()),
         };
 

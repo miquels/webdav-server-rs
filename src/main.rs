@@ -33,13 +33,17 @@ use std::sync::Arc;
 use clap::clap_app;
 use headers::{authorization::Basic, Authorization, HeaderMapExt};
 use http::status::StatusCode;
-use hyper::{self, server::conn::AddrStream, service::{service_fn, make_service_fn}};
+use hyper::{
+    self,
+    server::conn::AddrStream,
+    service::{make_service_fn, service_fn},
+};
 
 use pam_sandboxed::PamAuth;
-use webdav_handler::{fakels::FakeLs, ls::DavLockSystem, fs::DavFileSystem};
 use webdav_handler::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
+use webdav_handler::{fakels::FakeLs, fs::DavFileSystem, ls::DavLockSystem};
 
-use crate::config::{Auth, AuthType, AcctType, CaseInsensitive, Handler};
+use crate::config::{AcctType, Auth, AuthType, CaseInsensitive, Handler};
 use crate::rootfs::RootFs;
 use crate::suid::switch_ugid;
 use crate::userfs::UserFs;
@@ -49,9 +53,9 @@ static PROGNAME: &'static str = "webdav-server";
 // Contains "state" and a handle to the config.
 #[derive(Clone)]
 struct Server {
-    dh:         DavHandler,
-    pam_auth:   PamAuth,
-    config:     Arc<config::Config>,
+    dh:       DavHandler,
+    pam_auth: PamAuth,
+    config:   Arc<config::Config>,
 }
 
 type HttpResult = Result<hyper::Response<webdav_handler::body::Body>, io::Error>;
@@ -61,25 +65,19 @@ type HttpRequest = http::Request<hyper::Body>;
 impl Server {
     // Constructor.
     pub fn new(config: Arc<config::Config>, auth: PamAuth) -> Self {
-
         // mostly empty handler.
         let ls = FakeLs::new() as Box<dyn DavLockSystem>;
         let dh = DavHandler::builder().locksystem(ls).build_handler();
 
         Server {
-            dh:         dh,
-            pam_auth:   auth,
-            config:     config,
+            dh:       dh,
+            pam_auth: auth,
+            config:   config,
         }
     }
 
     // authenticate user.
-    async fn auth<'a>(
-        &'a self,
-        req: &'a HttpRequest,
-        remote_ip: SocketAddr,
-    ) -> Result<String, StatusCode>
-    {
+    async fn auth<'a>(&'a self, req: &'a HttpRequest, remote_ip: SocketAddr) -> Result<String, StatusCode> {
         // match the auth type (for now, only pam).
         match self.config.accounts.auth_type {
             Some(AuthType::Pam) => {},
@@ -191,12 +189,7 @@ impl Server {
     }
 
     // handle a request.
-    async fn handle(
-        &self,
-        req: HttpRequest,
-        remote_ip: SocketAddr,
-    ) -> HttpResult
-    {
+    async fn handle(&self, req: HttpRequest, remote_ip: SocketAddr) -> HttpResult {
         // Get the URI path.
         let davpath = match DavPath::from_uri(req.uri()) {
             Ok(p) => p,
@@ -220,9 +213,11 @@ impl Server {
         // See if we matched a :user parameter
         // If so, it must be valid UTF-8, or we return NOT_FOUND.
         let user_param = match route.params[0].as_ref() {
-            Some(p) => match p.as_str() {
-                Some(p) => Some(p),
-                None => return self.error(StatusCode::NOT_FOUND).await,
+            Some(p) => {
+                match p.as_str() {
+                    Some(p) => Some(p),
+                    None => return self.error(StatusCode::NOT_FOUND).await,
+                }
             },
             None => None,
         };
@@ -293,19 +288,29 @@ impl Server {
         let macos = user_agent.contains("WebDAVFS/") && user_agent.contains("Darwin");
 
         // Get the filesystem.
-        let auth_ugid = if location.setuid { pwd.as_ref().map(|p| (p.uid, p.gid)) } else { None };
+        let auth_ugid = if location.setuid {
+            pwd.as_ref().map(|p| (p.uid, p.gid))
+        } else {
+            None
+        };
         let fs = match location.handler {
             Handler::Virtroot => {
-                let auth_user = auth_user.as_ref().map(String::as_str).unwrap_or("UNKNOWN").to_string();
+                let auth_user = auth_user
+                    .as_ref()
+                    .map(String::as_str)
+                    .unwrap_or("UNKNOWN")
+                    .to_string();
                 RootFs::new(dir, auth_user, auth_ugid) as Box<dyn DavFileSystem>
             },
             Handler::Filesystem => {
                 UserFs::new(dir, auth_ugid, true, case_insensitive, macos) as Box<dyn DavFileSystem>
-            }
+            },
         };
 
         // Build a handler.
-        let methods = location.methods.unwrap_or(DavMethodSet::from_vec(vec!["GET"]).unwrap());
+        let methods = location
+            .methods
+            .unwrap_or(DavMethodSet::from_vec(vec!["GET"]).unwrap());
         let hide_symlinks = location.hide_symlinks.clone().unwrap_or(true);
 
         let mut config = DavConfig::new()
@@ -331,7 +336,8 @@ impl Server {
             code.as_u16(),
             code.canonical_reason().unwrap_or("")
         );
-        let mut response = self.response_builder()
+        let mut response = self
+            .response_builder()
             .status(code)
             .header("Content-Type", "text/xml");
         if code == StatusCode::UNAUTHORIZED {
@@ -348,13 +354,7 @@ impl Server {
     }
 
     // Call the davhandler, then add headers to the response.
-    async fn run_davhandler(
-        &self,
-        config: DavConfig,
-        req: HttpRequest,
-    ) -> HttpResult
-    {
-
+    async fn run_davhandler(&self, config: DavConfig, req: HttpRequest) -> HttpResult {
         match self.dh.handle_with(config, req).await {
             Ok(resp) => {
                 let (mut parts, body) = resp.into_parts();
@@ -444,19 +444,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         };
         let dav_server = dav_server.clone();
-		let make_service = make_service_fn(move |socket: &AddrStream| {
-			let dav_server = dav_server.clone();
+        let make_service = make_service_fn(move |socket: &AddrStream| {
+            let dav_server = dav_server.clone();
             let remote_addr = socket.remote_addr();
-			async move {
-				let func = move |req| {
-					let dav_server = dav_server.clone();
-					async move { dav_server.handle(req, remote_addr).await }
-				};
-				Ok::<_, hyper::Error>(service_fn(func))
-			}
-		});
+            async move {
+                let func = move |req| {
+                    let dav_server = dav_server.clone();
+                    async move { dav_server.handle(req, remote_addr).await }
+                };
+                Ok::<_, hyper::Error>(service_fn(func))
+            }
+        });
 
-		let server = hyper::Server::from_tcp(listener)?.tcp_nodelay(true);
+        let server = hyper::Server::from_tcp(listener)?.tcp_nodelay(true);
         println!("Listening on http://{:?}", sockaddr);
 
         servers.push(async move {
@@ -464,7 +464,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("server error: {}", e);
             }
         });
-
     }
 
     // drop privs.

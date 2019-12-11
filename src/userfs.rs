@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures::future::FutureExt;
+use webdav_handler::davpath::DavPath;
 use webdav_handler::fs::*;
 use webdav_handler::localfs::LocalFs;
-use webdav_handler::davpath::DavPath;
 
 use crate::cache;
 use crate::suid::UgidSwitch;
@@ -18,9 +18,9 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct UserFs {
-    pub fs:     LocalFs,
-    basedir:    PathBuf,
-    uid:        u32,
+    pub fs:  LocalFs,
+    basedir: PathBuf,
+    uid:     u32,
 }
 
 impl UserFs {
@@ -40,15 +40,15 @@ impl UserFs {
         let blocking_guard = Box::new(move || Box::new(switch.guard()) as Box<dyn Any>);
 
         Box::new(UserFs {
-            basedir:    dir.as_ref().to_path_buf(),
-            fs:         *LocalFs::new_with_fs_access_guard(
+            basedir: dir.as_ref().to_path_buf(),
+            fs:      *LocalFs::new_with_fs_access_guard(
                 dir,
                 public,
                 case_insensitive,
                 macos,
                 Some(blocking_guard),
             ),
-            uid:        uid,
+            uid:     uid,
         })
     }
 }
@@ -96,23 +96,24 @@ impl DavFileSystem for UserFs {
     }
 
     fn get_quota<'a>(&'a self) -> FsFuture<(u64, Option<u64>)> {
-        self.fs.blocking(move || {
-            let mut key = self.basedir.clone();
-            key.push(&self.uid.to_string());
-            let r = match QCACHE.get(&key) {
-                Some(r) => {
-                    debug!("get_quota for {:?}: from cache", key);
-                    r
-                },
-                None => {
-                    let path = &self.basedir;
-                    let r = FsQuota::check(path, Some(self.uid))
-                        .map_err(|_| FsError::GeneralFailure)?;
-                    debug!("get_quota for {:?}: insert to cache", key);
-                    QCACHE.insert(key, r)
-                },
-            };
-            Ok((r.bytes_used, r.bytes_limit))
-        }).boxed()
+        self.fs
+            .blocking(move || {
+                let mut key = self.basedir.clone();
+                key.push(&self.uid.to_string());
+                let r = match QCACHE.get(&key) {
+                    Some(r) => {
+                        debug!("get_quota for {:?}: from cache", key);
+                        r
+                    },
+                    None => {
+                        let path = &self.basedir;
+                        let r = FsQuota::check(path, Some(self.uid)).map_err(|_| FsError::GeneralFailure)?;
+                        debug!("get_quota for {:?}: insert to cache", key);
+                        QCACHE.insert(key, r)
+                    },
+                };
+                Ok((r.bytes_used, r.bytes_limit))
+            })
+            .boxed()
     }
 }

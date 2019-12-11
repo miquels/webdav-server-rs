@@ -7,8 +7,8 @@ use std;
 use std::path::Path;
 
 use futures::future::{self, FutureExt};
-use webdav_handler::fs::*;
 use webdav_handler::davpath::DavPath;
+use webdav_handler::fs::*;
 
 use crate::userfs::UserFs;
 
@@ -39,7 +39,7 @@ impl DavFileSystem for RootFs {
             let path = DavPath::new("/").unwrap();
             self.fs.metadata(&path).await
         }
-            .boxed()
+        .boxed()
     }
 
     // Only return one entry: "user".
@@ -49,21 +49,19 @@ impl DavFileSystem for RootFs {
         _meta: ReadDirMeta,
     ) -> FsFuture<FsStream<Box<dyn DavDirEntry>>>
     {
-        Box::pin(
-            async move {
-                let mut v = Vec::new();
-                if self.user != "" {
-                    v.push(RootFsDirEntry {
-                        name: self.user.clone(),
-                        meta: self.fs.metadata(path).await,
-                    });
-                }
-                let strm = futures::stream::iter(RootFsReadDir {
-                    iterator: v.into_iter(),
+        Box::pin(async move {
+            let mut v = Vec::new();
+            if self.user != "" {
+                v.push(RootFsDirEntry {
+                    name: self.user.clone(),
+                    meta: self.fs.metadata(path).await,
                 });
-                Ok(Box::pin(strm) as FsStream<Box<dyn DavDirEntry>>)
-            },
-        )
+            }
+            let strm = futures::stream::iter(RootFsReadDir {
+                iterator: v.into_iter(),
+            });
+            Ok(Box::pin(strm) as FsStream<Box<dyn DavDirEntry>>)
+        })
     }
 
     // cannot open any files.

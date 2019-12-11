@@ -10,7 +10,7 @@ use std::os::raw::{c_char, c_int};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use crate::{FsQuota, FqError, Mtab};
+use crate::{FqError, FsQuota, Mtab};
 
 // The actual implementation is done in C, and imported here.
 extern "C" {
@@ -36,7 +36,7 @@ pub(crate) fn get_quota(device: impl AsRef<Path>, uid: u32) -> Result<FsQuota, F
     let mut files_limit = 0u64;
 
     let path = CString::new(device.as_os_str().as_bytes())?;
-    let rc = unsafe { 
+    let rc = unsafe {
         fs_quota_linux(
             path.as_ptr(),
             id,
@@ -99,4 +99,3 @@ pub(crate) fn read_mtab() -> io::Result<Vec<Mtab>> {
     }
     Ok(result)
 }
-

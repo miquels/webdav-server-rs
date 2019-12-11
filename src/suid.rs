@@ -167,7 +167,7 @@ mod setuid {
     }
 }
 
-pub use self::setuid::{switch_ugid, thread_switch_ugid, has_thread_switch_ugid};
+pub use self::setuid::{has_thread_switch_ugid, switch_ugid, thread_switch_ugid};
 
 #[derive(Clone, Debug)]
 pub struct UgidSwitch {

@@ -82,47 +82,51 @@ pub struct Location {
     pub indexfile: Option<String>,
     #[serde(default)]
     pub autoindex: bool,
-    #[serde(rename = "case-insensitive", deserialize_with = "deserialize_opt_enum", default)]
+    #[serde(
+        rename = "case-insensitive",
+        deserialize_with = "deserialize_opt_enum",
+        default
+    )]
     pub case_insensitive: Option<CaseInsensitive>,
 }
 
 #[derive(FromStr, Debug, Clone, Copy)]
 pub enum Handler {
-    #[from_str="virtroot"]
+    #[from_str = "virtroot"]
     Virtroot,
-    #[from_str="filesystem"]
+    #[from_str = "filesystem"]
     Filesystem,
 }
 
 #[derive(FromStr, Debug, Clone, Copy)]
 pub enum Auth {
-    #[from_str="false"]
+    #[from_str = "false"]
     False,
-    #[from_str="true"]
+    #[from_str = "true"]
     True,
-    #[from_str="opportunistic"]
+    #[from_str = "opportunistic"]
     Opportunistic,
 }
 
 #[derive(FromStr, Debug, Clone, Copy)]
 pub enum AuthType {
-    #[from_str="pam"]
+    #[from_str = "pam"]
     Pam,
 }
 
 #[derive(FromStr, Debug, Clone, Copy)]
 pub enum AcctType {
-    #[from_str="unix"]
+    #[from_str = "unix"]
     Unix,
 }
 
 #[derive(FromStr, Debug, Clone, Copy)]
 pub enum CaseInsensitive {
-    #[from_str="true"]
+    #[from_str = "true"]
     True,
-    #[from_str="ms"]
+    #[from_str = "ms"]
     Ms,
-    #[from_str="false"]
+    #[from_str = "false"]
     False,
 }
 
@@ -235,7 +239,10 @@ pub fn check(cfg: &str, config: &Config) {
     for (idx, location) in config.location.iter().enumerate() {
         if location.setuid {
             if !crate::suid::has_thread_switch_ugid() {
-                eprintln!("{}: [[location]][{}]: setuid: uid switching not supported on this OS", cfg, idx);
+                eprintln!(
+                    "{}: [[location]][{}]: setuid: uid switching not supported on this OS",
+                    cfg, idx
+                );
                 exit(1);
             }
             if config.server.uid.is_none() || config.server.gid.is_none() {

@@ -1,9 +1,9 @@
 //!
 //! Simple and stupid HTTP router.
 //!
+use regex::bytes::{Match, Regex, RegexSet};
 use std::default::Default;
 use std::fmt::Debug;
-use regex::bytes::{Match, Regex, RegexSet};
 use webdav_handler::{DavMethod, DavMethodSet};
 
 // helper.
@@ -19,17 +19,17 @@ fn is_param_name(s: &str) -> bool {
 // internal representation of a route.
 #[derive(Debug)]
 struct Route<T: Debug> {
-    regex:      Regex,
-    methods:    Option<DavMethodSet>,
-    data:       T,
+    regex:   Regex,
+    methods: Option<DavMethodSet>,
+    data:    T,
 }
 
 /// A matched route.
 #[derive(Debug)]
-pub struct MatchedRoute<'t,'p, T: Debug> {
-    pub methods:    Option<DavMethodSet>,
-    pub params:     Vec<Option<Param<'p>>>,
-    pub data:       &'t T,
+pub struct MatchedRoute<'t, 'p, T: Debug> {
+    pub methods: Option<DavMethodSet>,
+    pub params:  Vec<Option<Param<'p>>>,
+    pub data:    &'t T,
 }
 
 /// A parameter on a matched route.
@@ -72,7 +72,7 @@ impl<'p> Param<'p> {
 }
 
 pub struct Builder<T: Debug> {
-    routes: Vec<Route<T>>
+    routes: Vec<Route<T>>,
 }
 
 impl<T: Debug> Builder<T> {
@@ -84,7 +84,13 @@ impl<T: Debug> Builder<T> {
     /// expression. Parameters are included as "named capture group".
     /// Otherwise, it's just the normal :pathelem and *splat params.
     ///
-    pub fn add(&mut self, route: impl AsRef<str>, methods: Option<DavMethodSet>, data: T) -> Result<&mut Self, regex::Error> {
+    pub fn add(
+        &mut self,
+        route: impl AsRef<str>,
+        methods: Option<DavMethodSet>,
+        data: T,
+    ) -> Result<&mut Self, regex::Error>
+    {
         let route = route.as_ref();
         // Might be a regexp
         if route.starts_with("^") {
@@ -129,14 +135,17 @@ impl<T: Debug> Builder<T> {
         // We known 's' starts with "^", add it after that.
         let s2 = format!("^(?s){}", &s[1..]);
         let regex = Regex::new(&s2)?;
-        self.routes.push(Route{ regex, methods, data });
+        self.routes.push(Route { regex, methods, data });
         Ok(self)
     }
 
     /// Combine all the routes and compile them into an internal RegexSet.
     pub fn build(self) -> Router<T> {
         let set = RegexSet::new(self.routes.iter().map(|r| r.regex.as_str())).unwrap();
-        Router { routes: self.routes, set }
+        Router {
+            routes: self.routes,
+            set,
+        }
     }
 }
 
@@ -144,12 +153,15 @@ impl<T: Debug> Builder<T> {
 #[derive(Debug)]
 pub struct Router<T: Debug> {
     set:    RegexSet,
-    routes: Vec<Route<T>>
+    routes: Vec<Route<T>>,
 }
 
 impl<T: Debug> Default for Router<T> {
     fn default() -> Router<T> {
-        Router{ set: RegexSet::new(&[] as &[&str]).unwrap(), routes: Vec::new() }
+        Router {
+            set:    RegexSet::new(&[] as &[&str]).unwrap(),
+            routes: Vec::new(),
+        }
     }
 }
 
@@ -162,7 +174,13 @@ impl<T: Debug> Router<T> {
     /// See if the path matches a route in the set.
     ///
     /// The names of the parameters you want to be returned need to be passed in as an array.
-    pub fn matches<'a>(&self, path: &'a [u8], method: DavMethod, param_names: &[&str]) -> Vec<MatchedRoute<'_, 'a, T>> {
+    pub fn matches<'a>(
+        &self,
+        path: &'a [u8],
+        method: DavMethod,
+        param_names: &[&str],
+    ) -> Vec<MatchedRoute<'_, 'a, T>>
+    {
         let mut matched = Vec::new();
         for idx in self.set.matches(path) {
             let route = &self.routes[idx];
@@ -177,14 +195,13 @@ impl<T: Debug> Router<T> {
                         params.push(None);
                     }
                 }
-                matched.push(MatchedRoute{
-                    methods:    route.methods,
+                matched.push(MatchedRoute {
+                    methods: route.methods,
                     params,
-                    data:       &route.data,
+                    data: &route.data,
                 });
             }
         }
         matched
     }
 }
-
