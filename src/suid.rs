@@ -214,6 +214,11 @@ impl Drop for UgidSwitchGuard {
     }
 }
 
+/// Do we have sufficient privs to switch uids?
+pub fn have_suid_privs() -> bool {
+    unsafe { libc::geteuid() == 0 }
+}
+
 /// Set uid/gid to a non-root value. Final, can not switch back to root
 /// or to any other id when this is done.
 #[allow(dead_code)]

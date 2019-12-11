@@ -458,7 +458,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // resolve addresses.
     let addrs = match config.server.listen.clone().to_socket_addrs() {
         Err(e) => {
-            eprintln!("{}: [server] listen: {:?}", cfg, e);
+            eprintln!("{}: {}: [server] listen: {:?}", PROGNAME, cfg, e);
             exit(1);
         },
         Ok(a) => a,
@@ -467,49 +467,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // initialize pam.
     let pam = PamAuth::new(config.pam.threads.clone())?;
 
-    // start servers (one for each listen address).
-    let dav_server = Server::new(config.clone(), pam);
-    let mut servers = Vec::new();
-    for sockaddr in addrs {
-        let listener = match make_listener(&sockaddr) {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
-                exit(1);
-            },
-        };
-        let dav_server = dav_server.clone();
-        let make_service = make_service_fn(move |socket: &AddrStream| {
-            let dav_server = dav_server.clone();
-            let remote_addr = socket.remote_addr();
-            async move {
-                let func = move |req| {
-                    let dav_server = dav_server.clone();
-                    async move { dav_server.route(req, remote_addr).await }
-                };
-                Ok::<_, hyper::Error>(service_fn(func))
-            }
-        });
+    // start tokio runtime and initialize the rest from within the runtime.
+    let mut rt = tokio::runtime::Builder::new()
+        .enable_io()
+        .enable_time()
+        .threaded_scheduler()
+        .build()?;
 
-        let server = hyper::Server::from_tcp(listener)?.tcp_nodelay(true);
-        println!("Listening on http://{:?}", sockaddr);
-
-        servers.push(async move {
-            if let Err(e) = server.serve(make_service).await {
-                eprintln!("server error: {}", e);
-            }
-        });
-    }
-
-    // drop privs.
-    match (&config.server.uid, &config.server.gid) {
-        (&Some(uid), &Some(gid)) => switch_ugid(uid, gid),
-        _ => {},
-    }
-
-    // start tokio runtime, run all servers, and wait for them to finish.
-    let mut rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
+
+        // build servers (one for each listen address).
+        let dav_server = Server::new(config.clone(), pam);
+        let mut servers = Vec::new();
+        for sockaddr in addrs {
+            let listener = match make_listener(&sockaddr) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
+                    exit(1);
+                },
+            };
+            let dav_server = dav_server.clone();
+            let make_service = make_service_fn(move |socket: &AddrStream| {
+                let dav_server = dav_server.clone();
+                let remote_addr = socket.remote_addr();
+                async move {
+                    let func = move |req| {
+                        let dav_server = dav_server.clone();
+                        async move { dav_server.route(req, remote_addr).await }
+                    };
+                    Ok::<_, hyper::Error>(service_fn(func))
+                }
+            });
+
+            let server = hyper::Server::from_tcp(listener)?.tcp_nodelay(true);
+            println!("Listening on http://{:?}", sockaddr);
+
+            servers.push(async move {
+                if let Err(e) = server.serve(make_service).await {
+                    eprintln!("{}: server error: {}", PROGNAME, e);
+                    exit(1);
+                }
+            });
+        }
+
+        // drop privs.
+        match (&config.server.uid, &config.server.gid) {
+            (&Some(uid), &Some(gid)) => {
+                if !suid::have_suid_privs() {
+                    eprintln!("{}: insufficent priviliges to switch uid/gid (not root).", PROGNAME);
+                    exit(1);
+                }
+                switch_ugid(uid, gid);
+            },
+            _ => {},
+        }
+
+        // spawn all servers, and wait for them to finish.
         let mut tasks = Vec::new();
         for server in servers.drain(..) {
             tasks.push(tokio::spawn(server));
@@ -517,9 +531,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for task in tasks.drain(..) {
             let _ = task.await;
         }
-    });
 
-    Ok(())
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })
 }
 
 // Clones a http request with an empty body.
