@@ -5,6 +5,7 @@
 //
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream as StdUnixStream;
+use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex};
 
 use bincode::{deserialize, serialize};
@@ -33,26 +34,32 @@ impl PamServer {
         let (sock1, sock2) = StdUnixStream::pair()?;
         let sock3 = sock2.try_clone()?;
 
-        // fork server.
-        let pid = unsafe { libc::fork() };
-        if pid < 0 {
-            let err = io::Error::last_os_error();
-            return Err(io::Error::new(io::ErrorKind::Other, format!("fork: {}", err)));
-        }
-        if pid == 0 {
-            // child process.
-            drop(sock1);
-            let mut server = PamServer {
-                rx_socket: sock2,
-                tx_socket: Arc::new(Mutex::new(sock3)),
-            };
-            pam_lower_rlimits();
-            trace!("PamServer: child: starting server");
-            server.serve(num_threads.unwrap_or(8));
-            std::process::exit(0);
-        }
-        drop(sock2);
-        drop(sock3);
+        let handle = std::thread::spawn(move || {
+            // fork server.
+            let pid = unsafe { libc::fork() };
+            if pid < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if pid == 0 {
+                // first, close all filedescriptors (well, all..)
+                for fdno in 3..8192 {
+                    if fdno != sock2.as_raw_fd() && fdno != sock3.as_raw_fd() {
+                        unsafe { libc::close(fdno); }
+                    }
+                }
+                let mut server = PamServer {
+                    rx_socket: sock2,
+                    tx_socket: Arc::new(Mutex::new(sock3)),
+                };
+                pam_lower_rlimits();
+                trace!("PamServer: child: starting server");
+                server.serve(num_threads.unwrap_or(8));
+                drop(server);
+                std::process::exit(0);
+            }
+            Ok(())
+        });
+        handle.join().unwrap()?;
 
         trace!("PamServer: parent: started server");
         Ok(sock1)

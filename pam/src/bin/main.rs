@@ -47,7 +47,7 @@ mod tests {
         test_mode(true);
 
         let mut pam = PamAuth::new(None).unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
 
         let res = rt.block_on(async {
             let mut pam2 = pam.clone();
@@ -72,18 +72,22 @@ mod tests {
         test_mode(true);
 
         let pam = PamAuth::new(None).unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
 
+        let mut handles = Vec::new();
         rt.block_on(async move {
             for i in 1u32..=1000 {
                 let mut pam = pam.clone();
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     if let Err(e) = pam.auth(TEST_STR, "test", "bar", Some(TEST_STR)).await {
                         panic!("auth(test) failed at iteration {}: {:?}", i, e);
                     }
                 });
+                handles.push(handle);
+            }
+            for handle in handles.drain(..) {
+                let _ = handle.await;
             }
         });
-        rt.shutdown_on_idle();
     }
 }

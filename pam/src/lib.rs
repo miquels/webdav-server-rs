@@ -34,7 +34,7 @@
 //!     // call this once, early.
 //!     let mut pam = PamAuth::new(None).expect("failed to initialized PAM");
 //!
-//!     let rt = tokio::runtime::Runtime::new().expect("failed to initialize tokio runtime");
+//!     let mut rt = tokio::runtime::Runtime::new().expect("failed to initialize tokio runtime");
 //!     rt.block_on(async move {
 //!         let res = pam.auth("other", "user", "pass", None).await;
 //!         println!("pam auth result: {:?}", res);
