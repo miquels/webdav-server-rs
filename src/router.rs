@@ -1,20 +1,12 @@
 //!
 //! Simple and stupid HTTP router.
 //!
-use regex::bytes::{Match, Regex, RegexSet};
 use std::default::Default;
 use std::fmt::Debug;
-use webdav_handler::{DavMethod, DavMethodSet};
 
-// helper.
-fn is_param_name(s: &str) -> bool {
-    for c in s.chars() {
-        if !((c >= 'a' && c <= 'z') || c == '_') {
-            return false;
-        }
-    }
-    s.len() > 0
-}
+use lazy_static::lazy_static;
+use regex::bytes::{Match, Regex, RegexSet};
+use webdav_handler::{DavMethod, DavMethodSet};
 
 // internal representation of a route.
 #[derive(Debug)]
@@ -81,8 +73,17 @@ impl<T: Debug> Builder<T> {
     /// Routes are matched in the order they were added.
     ///
     /// If a route starts with '^', it's assumed that it is a regular
-    /// expression. Parameters are included as "named capture group".
-    /// Otherwise, it's just the normal :pathelem and *splat params.
+    /// expression. Parameters are included as "named capture groups".
+    ///
+    /// Otherwise, it's a route-expression, with just the normal :params
+    /// and *splat param, and parts between parentheses are optional.
+    ///
+    /// Example:
+    ///
+    /// - /api/get/:id
+    /// - /files/*path
+    /// - /users(/)
+    /// - /users(/*path)
     ///
     pub fn add(
         &mut self,
@@ -101,32 +102,41 @@ impl<T: Debug> Builder<T> {
             return Ok(self);
         }
 
-        // Translate route expression into regexp.
-        let mut words = Vec::new();
-        let slash_end = route.len() > 1 && route.ends_with("/");
+        // First, replace special characters "()*" with unicode chars
+        // from the private-use area, so that we can then regex-escape
+        // the entire string.
+        let re_route = route
+            .chars()
+            .map(|c| match c {
+                '*' => '\u{e001}',
+                '(' => '\u{e002}',
+                ')' => '\u{e003}',
+                '\u{e001}' => ' ',
+                '\u{e002}' => ' ',
+                '\u{e003}' => ' ',
+                c => c,
+            }).collect::<String>();
+        let re_route = regex::escape(&re_route);
 
-        // split in path elements
-        for w in route.split("/").filter(|s| !s.is_empty()) {
-            // translate :param and *param to named capture groups.
-            let param = &w[1..];
-            let n = if w.starts_with(":") && is_param_name(param) {
-                format!(r"(?P<{}>[^/]*)", param)
-            } else if w.starts_with("*") && is_param_name(param) {
-                format!(r"(?P<{}>.*)", param)
-            } else {
-                regex::escape(w)
-            };
-            words.push(n);
-        }
+        // Translate route expression into regexp.
+        // We do a simple transformation:
+        //    :ident -> (?P<ident>[^/]*)
+        //    *ident -> (?P<ident>.*)
+        //    (text) -> (?:text|)
+        lazy_static! {
+            static ref COLON: Regex = Regex::new(":([a-zA-Z0-9]+)").unwrap();
+            static ref SPLAT: Regex = Regex::new("\u{e001}([a-zA-Z0-9]+)").unwrap();
+            static ref MAYBE: Regex = Regex::new("\u{e002}([^\u{e002}]*)\u{e003}").unwrap();
+        };
+        let mut re_route = re_route.into_bytes();
+        re_route = COLON.replace_all(&re_route, &b"(?P<$1>[^/]*)"[..]).to_vec();
+        re_route = SPLAT.replace_all(&re_route, &b"(?P<$1>.*)"[..]).to_vec();
+        re_route = MAYBE.replace_all(&re_route, &b"($1)?"[..]).to_vec();
 
         // finalize regex.
-        let mut r = "^/".to_string() + &words.join("/");
-        if slash_end {
-            r.push('/');
-        }
-        r.push('$');
+        let re_route = "^".to_string() + &String::from_utf8(re_route).unwrap() + "$";
 
-        self.add_re(&r, methods, data)
+        self.add_re(&re_route, methods, data)
     }
 
     // add route as regular expression.
@@ -140,10 +150,10 @@ impl<T: Debug> Builder<T> {
     }
 
     /// Combine all the routes and compile them into an internal RegexSet.
-    pub fn build(self) -> Router<T> {
+    pub fn build(&mut self) -> Router<T> {
         let set = RegexSet::new(self.routes.iter().map(|r| r.regex.as_str())).unwrap();
         Router {
-            routes: self.routes,
+            routes: std::mem::replace(&mut self.routes, Vec::new()),
             set,
         }
     }
@@ -203,5 +213,41 @@ impl<T: Debug> Router<T> {
             }
         }
         matched
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use webdav_handler::DavMethod;
+
+    fn test_match(rtr: &Router<usize>, p: &[u8], user: &str, path: &str) {
+        let x = rtr.matches(p, DavMethod::Get, &[ "user", "path" ]);
+        assert!(x.len() > 0);
+        let x = &x[0];
+        if user != "" {
+            assert!(x.params[0].as_ref().map(|b| b.as_bytes() == user.as_bytes()).unwrap_or(false));
+        }
+        if path != "" {
+            assert!(x.params[1].as_ref().map(|b| b.as_bytes() == path.as_bytes()).unwrap_or(false));
+        }
+    }
+
+    #[test]
+    fn test_router() -> Result<(), Box<dyn std::error::Error>> {
+        let rtr = Router::<usize>::builder()
+            .add("/", None, 1)?
+            .add("/users(/:user)", None, 2)?
+            .add("/files/*path", None, 3)?
+            .add("/files(/*path)", None, 4)?
+            .build();
+
+        test_match(&rtr, b"/", "", "");
+        test_match(&rtr, b"/users", "", "");
+        test_match(&rtr, b"/users/", "", "");
+        test_match(&rtr, b"/users/mike", "mike", "");
+        test_match(&rtr, b"/files/foo/bar", "", "foo/bar");
+        test_match(&rtr, b"/files", "", "");
+        Ok(())
     }
 }

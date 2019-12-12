@@ -295,18 +295,20 @@ impl Server {
         };
 
         // If :path matched, we can calculate the prefix.
+        // If it didn't, the entire path _is_ the prefix.
         let prefix = match route.params[1].as_ref() {
             Some(p) => {
                 let mut start = p.start();
                 if start > 0 {
                     start -= 1;
                 }
-                match std::str::from_utf8(&path[..start]) {
-                    Ok(p) => p.to_string(),
-                    Err(_) => return self.error(StatusCode::NOT_FOUND).await,
-                }
+                &path[..start]
             },
-            None => String::from(""),
+            None => path,
+        };
+        let prefix = match std::str::from_utf8(prefix) {
+            Ok(p) => p.to_string(),
+            Err(_) => return self.error(StatusCode::NOT_FOUND).await,
         };
 
         // Get User-Agent for user-agent specific modes.
@@ -336,9 +338,7 @@ impl Server {
             Handler::Virtroot => {
                 let auth_user = auth_user
                     .as_ref()
-                    .map(String::as_str)
-                    .unwrap_or("UNKNOWN")
-                    .to_string();
+                    .map(String::to_owned);
                 RootFs::new(dir, auth_user, auth_ugid) as Box<dyn DavFileSystem>
             },
             Handler::Filesystem => {
