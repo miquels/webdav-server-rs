@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::Path;
 use std::process::exit;
@@ -19,6 +20,8 @@ pub struct Config {
     #[serde(default)]
     pub pam: Pam,
     #[serde(default)]
+    pub htpasswd: HashMap<String, HtPasswd>,
+    #[serde(default)]
     pub unix: Unix,
     #[serde(default)]
     pub location: Vec<Location>,
@@ -39,7 +42,7 @@ pub struct Server {
 
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct Accounts {
-    #[serde(rename = "auth-type", deserialize_with = "deserialize_opt_enum", default)]
+    #[serde(rename = "auth-type", deserialize_with = "deserialize_authtype", default)]
     pub auth_type: Option<AuthType>,
     #[serde(rename = "acct-type", deserialize_with = "deserialize_opt_enum", default)]
     pub acct_type: Option<AcctType>,
@@ -53,6 +56,11 @@ pub struct Pam {
     #[serde(rename = "cache-timeout")]
     pub cache_timeout: Option<usize>,
     pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct HtPasswd {
+    pub htpasswd: String,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -71,6 +79,8 @@ pub struct Location {
     pub methods: Option<DavMethodSet>,
     #[serde(deserialize_with = "deserialize_opt_enum", default)]
     pub auth: Option<Auth>,
+    #[serde(default, flatten)]
+    pub accounts: Accounts,
     #[serde(deserialize_with = "deserialize_enum")]
     pub handler: Handler,
     #[serde(default)]
@@ -112,10 +122,10 @@ pub enum Auth {
     Write,
 }
 
-#[derive(FromStr, Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum AuthType {
-    #[from_str = "pam"]
     Pam,
+    HtPasswd(String),
 }
 
 #[derive(FromStr, Debug, Clone, Copy)]
@@ -186,6 +196,20 @@ where D: Deserializer<'de> {
     DavMethodSet::from_vec(m)
         .map(|v| Some(v))
         .map_err(serde::de::Error::custom)
+}
+
+pub fn deserialize_authtype<'de, D>(deserializer: D) -> Result<Option<AuthType>, D::Error>
+where D: Deserializer<'de> {
+    let s = String::deserialize(deserializer)?;
+    if s.starts_with("htpasswd.") {
+        Ok(Some(AuthType::HtPasswd(s[9..].to_string())))
+    } else if &s == "pam" {
+        Ok(Some(AuthType::Pam))
+    } else if s == "" {
+        Ok(None)
+    } else {
+        Err(serde::de::Error::custom("unknown auth-type"))
+    }
 }
 
 pub fn deserialize_opt_enum<'de, D, E>(deserializer: D) -> Result<Option<E>, D::Error>
@@ -259,6 +283,10 @@ pub fn check(cfg: &str, config: &Config) {
             }
             if config.server.uid.is_none() || config.server.gid.is_none() {
                 eprintln!("{}: [server]: missing uid and/or gid", cfg);
+                exit(1);
+            }
+            if config.accounts.acct_type.is_none() && location.accounts.acct_type.is_none() {
+                eprintln!("{}: [[location]][{}]: setuid: no acct-type set", cfg, idx);
                 exit(1);
             }
         }

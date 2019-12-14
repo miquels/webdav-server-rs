@@ -15,8 +15,11 @@
 #
 # User settings.
 #
+# These are defaults. The same settings can be applied
+# on the [[location]] level.
+#
 [accounts]
-  # how to authenticate (default: unset).
+  # how to authenticate: pam, htaccess.NAME (default: unset).
   auth-type = "pam"
   # what account "database" to use (default: unset).
   acct-type = "unix"
@@ -35,6 +38,12 @@
   threads = 8
 
 #
+# Htaccess authentication settings.
+#
+[htaccess.example]
+  # htaccess file.
+  htaccess = "/tmp/htacess.example"
+
 # Unix account settings.
 #
 [unix]
@@ -63,7 +72,9 @@
   #route = [ "/" ]
 
   # Allowed methods.
+  #
   # List of individual methods, or one of:
+  #
   # http-ro: GET, HEAD
   # http-rw: GET, HEAD, PUT
   # webdav-ro: GET, HEAD, OPTIONS, PROPFIND
@@ -71,9 +82,10 @@
   #            MKCOL, COPY, MOVE, DELETE, LOCK, UNLOCK
   methods = [ "http-ro" ]
 
-  # Authenticate? true, false, opportunistic, write.
+  # Authenticate? true, false, opportunistic, write (default: opportunistic).
+  #
   # "opportunistic": means "if you send an Authorization: header, we'll check it".
-  # "write": means "for methods not in webdav-ro".
+  # "write": means "for methods in webdav-rw that are not in webdav-ro".
   auth = "false"
 
   # Type of handler: filesystem, virtroot. Mandatory.

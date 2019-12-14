@@ -15,7 +15,6 @@
 extern crate log;
 
 mod cache;
-mod cached;
 mod config;
 mod rootfs;
 #[doc(hidden)]
@@ -78,13 +77,7 @@ impl Server {
     }
 
     // authenticate user.
-    async fn auth<'a>(&'a self, req: &'a HttpRequest, remote_ip: SocketAddr) -> Result<String, StatusCode> {
-        // match the auth type (for now, only pam).
-        match self.config.accounts.auth_type {
-            Some(AuthType::Pam) => {},
-            None => return Err(StatusCode::UNAUTHORIZED),
-        }
-
+    async fn auth<'a>(&'a self, req: &'a HttpRequest, location: &Location, remote_ip: SocketAddr) -> Result<String, StatusCode> {
         // we must have a login/pass
         let basic = match req.headers().typed_get::<Authorization<Basic>>() {
             Some(Authorization(basic)) => basic,
@@ -93,6 +86,17 @@ impl Server {
         let user = basic.username();
         let pass = basic.password();
 
+        // match the auth type.
+        let auth_type = location.accounts.auth_type.as_ref().or(self.config.accounts.auth_type.as_ref());
+        match auth_type {
+            Some(&AuthType::Pam) => self.auth_pam(req, user, pass, remote_ip).await,
+            Some(&AuthType::HtPasswd(ref ht)) => self.auth_htpasswd(user, pass, ht.as_str()).await,
+            None => Err(StatusCode::UNAUTHORIZED),
+        }
+    }
+
+    // authenticate user using PAM.
+    async fn auth_pam<'a>(&'a self, req: &'a HttpRequest, user: &'a str, pass: &'a str, remote_ip: SocketAddr) -> Result<String, StatusCode> {
         // stringify the remote IP address.
         let ip = remote_ip.ip();
         let ip_string = if ip.is_loopback() {
@@ -114,15 +118,46 @@ impl Server {
         // authenticate.
         let service = self.config.pam.service.as_str();
         let pam_auth = self.pam_auth.clone();
-        match cached::pam_auth(pam_auth, service, user, pass, ip_ref).await {
+        match cache::cached::pam_auth(pam_auth, service, user, pass, ip_ref).await {
             Ok(_) => Ok(user.to_string()),
             Err(_) => Err(StatusCode::UNAUTHORIZED),
         }
     }
 
+    // authenticate user using htpasswd.
+    async fn auth_htpasswd<'a>(&'a self, user: &'a str, pass: &'a str, section: &'a str) -> Result<String, StatusCode> {
+
+        // Get the htpasswd.WHATEVER section from the config file.
+        let file = match self.config.htpasswd.get(section) {
+            Some(section) => section.htpasswd.as_str(),
+            None => return Err(StatusCode::UNAUTHORIZED),
+        };
+
+        // Read the file and split it into a bunch of lines.
+        let res = tokio::task::block_in_place(move || std::fs::read_to_string(file));
+        let data = match res {
+            Ok(data) => data,
+            Err(_) => return Err(StatusCode::UNAUTHORIZED),
+        };
+        let lines = data.split('\n').map(|s| s.trim()).filter(|s| !s.starts_with("#") && !s.is_empty());
+
+        // Check each line for a match.
+        for line in lines {
+            let mut fields = line.split(':');
+            if let (Some(htuser), Some(htpass)) = (fields.next(), fields.next()) {
+                if htuser == user && pwhash::unix::verify(pass, htpass) {
+                    return Ok(user.to_string());
+                }
+            }
+        }
+
+        Err(StatusCode::UNAUTHORIZED)
+    }
+
     // check user account.
     async fn acct<'a>(
         &'a self,
+        location: &Location,
         auth_user: Option<&'a String>,
         user_param: Option<&'a str>,
     ) -> Result<Option<Arc<unixuser::User>>, StatusCode>
@@ -133,24 +168,27 @@ impl Server {
             None => return Ok(None),
         };
 
-        // For now, we only support unix accounts,
-        // so if another type is set - or none - we return NOT_FOUND.
-        match self.config.accounts.acct_type {
-            Some(AcctType::Unix) => {},
-            None => return Err(StatusCode::NOT_FOUND),
+        // If account is not set, fine.
+        let acct_type = location.accounts.acct_type.as_ref().or(self.config.accounts.acct_type.as_ref());
+        match acct_type {
+            Some(&AcctType::Unix) => {},
+            None => return Ok(None),
         };
 
         // check if user exists.
-        let pwd = match cached::unixuser(user).await {
+        let pwd = match cache::cached::unixuser(user).await {
             Ok(pwd) => pwd,
-            Err(_) => return Err(StatusCode::UNAUTHORIZED),
+            Err(_) => {
+                debug!("acct: unix: user {} not found", user);
+                return Err(StatusCode::UNAUTHORIZED);
+            },
         };
 
         // check minimum uid
         if let Some(min_uid) = self.config.unix.min_uid {
             if pwd.uid < min_uid {
                 debug!(
-                    "Server::auth: {}: uid {} too low (<{})",
+                    "acct: {}: uid {} too low (<{})",
                     pwd.name, pwd.uid, min_uid
                 );
                 return Err(StatusCode::FORBIDDEN);
@@ -264,18 +302,18 @@ impl Server {
         let auth_hdr = req.headers().typed_get::<Authorization<Basic>>();
         let do_auth = match location.auth {
             Some(Auth::True) => true,
-            Some(Auth::Opportunistic) => auth_hdr.is_some(),
-            Some(Auth::Write) => !DavMethodSet::WEBDAV_RO.contains(method),
-            Some(Auth::False) | None => false,
+            Some(Auth::Write) => !DavMethodSet::WEBDAV_RO.contains(method) || auth_hdr.is_some(),
+            Some(Auth::False) => false,
+            Some(Auth::Opportunistic) | None => auth_hdr.is_some(),
         };
         let auth_user = if do_auth {
-            let user = match self.auth(&req, remote_ip).await {
+            let user = match self.auth(&req, location, remote_ip).await {
                 Ok(user) => user,
-                Err(status) => return self.error(status).await,
+                Err(status) => return self.auth_error(status, location).await,
             };
             // if there was a :user in the route, return error if it does not match.
             if user_param.map(|u| u != &user).unwrap_or(false) {
-                return self.error(StatusCode::UNAUTHORIZED).await;
+                return self.auth_error(StatusCode::UNAUTHORIZED, location).await;
             }
             Some(user)
         } else {
@@ -283,9 +321,9 @@ impl Server {
         };
 
         // Now see if we want to do a account lookup, for uid/gid/homedir.
-        let pwd = match self.acct(auth_user.as_ref(), user_param).await {
+        let pwd = match self.acct(location, auth_user.as_ref(), user_param).await {
             Ok(pwd) => pwd,
-            Err(status) => return self.error(status).await,
+            Err(status) => return self.auth_error(status, location).await,
         };
 
         // Expand "~" in the directory.
@@ -308,7 +346,10 @@ impl Server {
         };
         let prefix = match std::str::from_utf8(prefix) {
             Ok(p) => p.to_string(),
-            Err(_) => return self.error(StatusCode::NOT_FOUND).await,
+            Err(_) => {
+                debug!("handle: prefix is non-UTF8");
+                return self.error(StatusCode::NOT_FOUND).await;
+            },
         };
 
         // Get User-Agent for user-agent specific modes.
@@ -349,7 +390,7 @@ impl Server {
         // Build a handler.
         let methods = location
             .methods
-            .unwrap_or(DavMethodSet::from_vec(vec!["GET"]).unwrap());
+            .unwrap_or(DavMethodSet::from_vec(vec!["GET", "HEAD"]).unwrap());
         let hide_symlinks = location.hide_symlinks.clone().unwrap_or(true);
 
         let mut config = DavConfig::new()
@@ -369,7 +410,7 @@ impl Server {
         self.run_davhandler(config, req).await
     }
 
-    async fn error(&self, code: StatusCode) -> HttpResult {
+    async fn build_error(&self, code: StatusCode, location: Option<&Location>) -> HttpResult {
         let msg = format!(
             "<error>{} {}</error>\n",
             code.as_u16(),
@@ -380,16 +421,29 @@ impl Server {
             .status(code)
             .header("Content-Type", "text/xml");
         if code == StatusCode::UNAUTHORIZED {
-            let realm = self
+            let realm = location.and_then(|location|
+                location
+                .accounts
+                .realm.as_ref());
+            let realm = realm.or(self
                 .config
                 .accounts
                 .realm
-                .as_ref()
+                .as_ref());
+            let realm = realm
                 .map(|s| s.as_str())
                 .unwrap_or("Webdav Server");
             response = response.header("WWW-Authenticate", format!("Basic realm=\"{}\"", realm).as_str());
         }
         Ok(response.body(msg.into()).unwrap())
+    }
+
+    async fn auth_error(&self, code: StatusCode, location: &Location) -> HttpResult {
+        self.build_error(code, Some(location)).await
+    }
+
+    async fn error(&self, code: StatusCode) -> HttpResult {
+        self.build_error(code, None).await
     }
 
     // Call the davhandler, then add headers to the response.
@@ -453,10 +507,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // set cache timeouts.
     if let Some(timeout) = config.pam.cache_timeout {
-        cached::set_pamcache_timeout(timeout);
+        cache::cached::set_pamcache_timeout(timeout);
     }
     if let Some(timeout) = config.unix.cache_timeout {
-        cached::set_pwcache_timeout(timeout);
+        cache::cached::set_pwcache_timeout(timeout);
     }
 
     // resolve addresses.
@@ -561,10 +615,17 @@ fn expand_directory(dir: &str, pwd: Option<&Arc<unixuser::User>>) -> Result<Stri
     }
     // ~whatever doesn't work.
     if dir.len() > 1 && !dir.starts_with("~/") {
+        debug!("expand_directory: rejecting {}", dir);
         return Err(StatusCode::NOT_FOUND);
     }
     // must have a directory, and that dir must be UTF-8.
-    let pwd = pwd.ok_or(StatusCode::NOT_FOUND)?;
+    let pwd = match pwd {
+        Some(pwd) => pwd,
+        None => {
+            debug!("expand_directory: cannot expand {}: no account", dir);
+            return Err(StatusCode::NOT_FOUND);
+        }
+    };
     let homedir = pwd.dir.to_str().ok_or(StatusCode::NOT_FOUND)?;
     Ok(format!("{}/{}", homedir, &dir[1..]))
 }

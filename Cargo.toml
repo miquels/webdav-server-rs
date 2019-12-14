@@ -44,3 +44,4 @@ tokio = { version = "0.2.4", features = ["full"] }
 toml = "0.5.5"
 url = "2.1.0"
 webdav-handler = { path = "../webdav-handler-rs", version = "=0.2.0-alpha.3" }
+pwhash = "0.3.0"
