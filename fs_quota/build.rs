@@ -2,6 +2,7 @@ extern crate cc;
 
 use std::fs::File;
 use std::io::prelude::*;
+use std::path::Path;
 use std::process::Command;
 
 fn run_rpcgen() {
@@ -40,13 +41,21 @@ fn main() {
 
     #[cfg(feature = "nfs")]
     {
+        if Path::new("/usr/include/tirpc").exists() {
+            // Fedora does not include RPC support in glibc anymore, so use tirpc instead.
+            builder.include("/usr/include/tirpc");
+        }
         builder.file("src/quota-nfs.c").file("src/rquota_xdr.c");
     }
     builder
         .flag_if_supported("-Wno-unused-variable")
         .compile("fs_quota");
 
-    println!("cargo:rustc-link-lib=rpcsvc");
+    if Path::new("/usr/include/tirpc").exists() {
+        println!("cargo:rustc-link-lib=tirpc");
+    } else {
+        println!("cargo:rustc-link-lib=rpcsvc");
+    }
 
     #[cfg(target_os = "linux")]
     println!("cargo:rerun-if-changed=src/quota-linux.c");
