@@ -38,11 +38,11 @@
   threads = 8
 
 #
-# Htaccess authentication settings.
+# Htpasswd authentication settings.
 #
-[htaccess.example]
-  # htaccess file.
-  htaccess = "/tmp/htacess.example"
+[htpasswd.example]
+  # htpasswd file.
+  htpasswd = "/etc/htpasswd.example"
 
 # Unix account settings.
 #
@@ -59,7 +59,7 @@
 #
 
 ##
-## Example location. Lists all the defaults.
+## Example location. Lists all settings.
 ##
 [[location]]
   # Matching route(s) to the resource.
@@ -69,9 +69,9 @@
   # For authenticated webdav sessions, /:user/*path is common.
   #
   # If there is no route defined, the location is ignored.
-  #route = [ "/" ]
+  route = [ "/" ]
 
-  # Allowed methods.
+  # Allowed methods (default: all).
   #
   # List of individual methods, or one of:
   #
@@ -80,7 +80,7 @@
   # webdav-ro: GET, HEAD, OPTIONS, PROPFIND
   # webdav-rw: GET, HEAD, OPTIONS, PROPFIND, PUT, PATCH, PROPPATCH,
   #            MKCOL, COPY, MOVE, DELETE, LOCK, UNLOCK
-  methods = [ "http-ro" ]
+  methods = [ "webdav-ro" ]
 
   # Authenticate? true, false, opportunistic, write (default: opportunistic).
   #
@@ -105,10 +105,13 @@
   # what to do on 404 Not Found: continue, return (default: return).
   on_notfound = "return"
 
-  # Change UID/GID to that of the authenticated user: true, false.
+  # Change UID/GID to that of the authenticated user: true, false (default: false).
   setuid = false
 
   # Directory to serve. Mandatory.
+  #
+  # You can use "~" to indicate "homedirectory of authenticated user".
+  #
   directory = "/var/www/html"
 
   # Index file to serve when you GET a directory (if it exists) (default: none).
@@ -120,7 +123,7 @@
   # webdav PROPFIND: hide symbolic links: true, false (default: true).
   hide-symlinks = true
 
-  # case insensitive lookups: true, false, ms.
+  # case insensitive lookups: true, false, ms (default: false).
   # "ms" means "for Microsoft clients".
   case-insensitive = "false"
 
