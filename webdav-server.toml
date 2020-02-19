@@ -63,13 +63,30 @@
 ##
 [[location]]
   # Matching route(s) to the resource.
-  # :path is the part of the path to map to the filesystem
-  # :user matches the currently authenticated user.
   #
-  # For authenticated webdav sessions, /:user/*path is common.
+  # As is the convention with many http routers, you can use :PARAMETER
+  # (path element match) or *PARAMETER (path wildcard match) in the
+  # path definition. Everything between parentheses is optional.
+  #
+  # Currently 2 parameters can be used:
+  #
+  # - "path" is the part of the path to map to the filesystem
+  # - "user" matches the currently authenticated user.
+  #
+  # A couple of examples:
+  #
+  # - For authenticated webdav sessions: [ "/:user/*path" ] or [ "/:user(/*path)" ]
+  # - For serving / but no dirs below it: [ "/(:path)" ]
+  # - For serving / and everything below it: [ "/*path" ]
+  # - For serving /, /css and /static: [ "/(:path)", "/css/(:path)", "/static/(:path)" ]
+  #
+  # Note that only "path" is what is applied to the "directory" setting to
+  # form a path on the filesystem. So route = [ "/loca/tion/*path" ] and
+  # directory = "/var/www/html" will serve the content of /var/www/html
+  # at the http path /loca/tion/.
   #
   # If there is no route defined, the location is ignored.
-  route = [ "/" ]
+  route = [ "/*path" ]
 
   # Allowed methods (default: all).
   #
