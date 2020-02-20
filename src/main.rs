@@ -91,7 +91,10 @@ impl Server {
         match auth_type {
             Some(&AuthType::Pam) => self.auth_pam(req, user, pass, remote_ip).await,
             Some(&AuthType::HtPasswd(ref ht)) => self.auth_htpasswd(user, pass, ht.as_str()).await,
-            None => Err(StatusCode::UNAUTHORIZED),
+            None => {
+                debug!("need authentication, but auth-type is not set");
+                Err(StatusCode::UNAUTHORIZED)
+            },
         }
     }
 
@@ -120,7 +123,10 @@ impl Server {
         let pam_auth = self.pam_auth.clone();
         match cache::cached::pam_auth(pam_auth, service, user, pass, ip_ref).await {
             Ok(_) => Ok(user.to_string()),
-            Err(_) => Err(StatusCode::UNAUTHORIZED),
+            Err(_) => {
+                debug!("auth_pam({}): authentication for {} ({:?}) failed", service, user, ip_ref);
+                Err(StatusCode::UNAUTHORIZED)
+            },
         }
     }
 
@@ -137,7 +143,10 @@ impl Server {
         let res = tokio::task::block_in_place(move || std::fs::read_to_string(file));
         let data = match res {
             Ok(data) => data,
-            Err(_) => return Err(StatusCode::UNAUTHORIZED),
+            Err(e) => {
+                debug!("{}: {}", file, e);
+                return Err(StatusCode::UNAUTHORIZED);
+            },
         };
         let lines = data.split('\n').map(|s| s.trim()).filter(|s| !s.starts_with("#") && !s.is_empty());
 
@@ -151,6 +160,7 @@ impl Server {
             }
         }
 
+        debug!("auth_htpasswd: authentication for {} failed", user);
         Err(StatusCode::UNAUTHORIZED)
     }
 
@@ -244,6 +254,7 @@ impl Server {
 
         // Request is stored here.
         let mut reqdata = Some(req);
+        let mut got_match = false;
 
         // Match routes to one or more locations.
         for route in self
@@ -252,6 +263,8 @@ impl Server {
             .matches(path, method, &["user", "path"])
             .drain(..)
         {
+            got_match = true;
+
             // Take the request from the option.
             let req = reqdata.take().unwrap();
 
@@ -270,6 +283,10 @@ impl Server {
             if reqdata.is_none() || res.status() != StatusCode::NOT_FOUND {
                 return Ok(res);
             }
+        }
+
+        if !got_match {
+            debug!("route: no matching route for {:?}", davpath);
         }
 
         self.error(StatusCode::NOT_FOUND).await
@@ -292,7 +309,10 @@ impl Server {
             Some(p) => {
                 match p.as_str() {
                     Some(p) => Some(p),
-                    None => return self.error(StatusCode::NOT_FOUND).await,
+                    None => {
+                        debug!("handle: invalid utf-8 in :user part of path");
+                        return self.error(StatusCode::NOT_FOUND).await;
+                    },
                 }
             },
             None => None,
@@ -313,6 +333,7 @@ impl Server {
             };
             // if there was a :user in the route, return error if it does not match.
             if user_param.map(|u| u != &user).unwrap_or(false) {
+                debug!("handle: auth user and :user mismatch");
                 return self.auth_error(StatusCode::UNAUTHORIZED, location).await;
             }
             Some(user)
