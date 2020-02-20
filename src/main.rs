@@ -140,28 +140,29 @@ impl Server {
         };
 
         // Read the file and split it into a bunch of lines.
-        let res = tokio::task::block_in_place(move || std::fs::read_to_string(file));
-        let data = match res {
-            Ok(data) => data,
-            Err(e) => {
-                debug!("{}: {}", file, e);
-                return Err(StatusCode::UNAUTHORIZED);
-            },
-        };
-        let lines = data.split('\n').map(|s| s.trim()).filter(|s| !s.starts_with("#") && !s.is_empty());
+        tokio::task::block_in_place(move || {
+            let data = match std::fs::read_to_string(file) {
+                Ok(data) => data,
+                Err(e) => {
+                    debug!("{}: {}", file, e);
+                    return Err(StatusCode::UNAUTHORIZED);
+                },
+            };
+            let lines = data.split('\n').map(|s| s.trim()).filter(|s| !s.starts_with("#") && !s.is_empty());
 
-        // Check each line for a match.
-        for line in lines {
-            let mut fields = line.split(':');
-            if let (Some(htuser), Some(htpass)) = (fields.next(), fields.next()) {
-                if htuser == user && pwhash::unix::verify(pass, htpass) {
-                    return Ok(user.to_string());
+            // Check each line for a match.
+            for line in lines {
+                let mut fields = line.split(':');
+                if let (Some(htuser), Some(htpass)) = (fields.next(), fields.next()) {
+                    if htuser == user && pwhash::unix::verify(pass, htpass) {
+                        return Ok(user.to_string());
+                    }
                 }
             }
-        }
 
-        debug!("auth_htpasswd: authentication for {} failed", user);
-        Err(StatusCode::UNAUTHORIZED)
+            debug!("auth_htpasswd: authentication for {} failed", user);
+            Err(StatusCode::UNAUTHORIZED)
+        })
     }
 
     // check user account.
