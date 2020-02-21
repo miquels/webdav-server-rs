@@ -53,9 +53,10 @@
   min-uid = 1000
 
 #
-# Below follows a list of locations. For every request, the "path"
-# and "methods" settings of each location are checked in the same order
-# as they appear in this file. The first one that matches, is used.
+# Below follow a number of locations. Each location definition starts with
+# [[location]] (literally). For every request, the "path" and "methods"
+# settings of each location are checked in the same order # as they appear
+# in this file. The first one that matches is used.
 #
 
 ##
@@ -78,7 +79,6 @@
   # - For authenticated webdav sessions: [ "/:user/*path" ] or [ "/:user(/*path)" ]
   # - For serving / but no dirs below it: [ "/(:path)" ]
   # - For serving / and everything below it: [ "/*path" ]
-  # - For serving /, /css and /static: [ "/(:path)", "/css/(:path)", "/static/(:path)" ]
   #
   # Note that only "path" is what is applied to the "directory" setting to
   # form a path on the filesystem. So route = [ "/loca/tion/*path" ] and
@@ -143,4 +143,7 @@
   # case insensitive lookups: true, false, ms (default: false).
   # "ms" means "for Microsoft clients".
   case-insensitive = "false"
+
+# Another location definition could follow.
+#[[location]]
 
