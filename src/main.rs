@@ -470,14 +470,10 @@ impl Server {
 
     // Call the davhandler, then add headers to the response.
     async fn run_davhandler(&self, config: DavConfig, req: HttpRequest) -> HttpResult {
-        match self.dh.handle_with(config, req).await {
-            Ok(resp) => {
-                let (mut parts, body) = resp.into_parts();
-                self.set_server_header(&mut parts.headers);
-                Ok(http::Response::from_parts(parts, body))
-            },
-            Err(e) => Err(e),
-        }
+        let resp = self.dh.handle_with(config, req).await;
+        let (mut parts, body) = resp.into_parts();
+        self.set_server_header(&mut parts.headers);
+        Ok(http::Response::from_parts(parts, body))
     }
 }
 

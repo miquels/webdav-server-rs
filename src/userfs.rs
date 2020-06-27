@@ -96,24 +96,26 @@ impl DavFileSystem for UserFs {
     }
 
     fn get_quota<'a>(&'a self) -> FsFuture<(u64, Option<u64>)> {
-        self.fs
-            .blocking(move || {
-                let mut key = self.basedir.clone();
-                key.push(&self.uid.to_string());
-                let r = match QCACHE.get(&key) {
-                    Some(r) => {
-                        debug!("get_quota for {:?}: from cache", key);
-                        r
-                    },
-                    None => {
-                        let path = &self.basedir;
-                        let r = FsQuota::check(path, Some(self.uid)).map_err(|_| FsError::GeneralFailure)?;
-                        debug!("get_quota for {:?}: insert to cache", key);
-                        QCACHE.insert(key, r)
-                    },
-                };
-                Ok((r.bytes_used, r.bytes_limit))
-            })
-            .boxed()
+        async move {
+            let mut key = self.basedir.clone();
+            key.push(&self.uid.to_string());
+            let r = match QCACHE.get(&key) {
+                Some(r) => {
+                    debug!("get_quota for {:?}: from cache", key);
+                    r
+                },
+                None => {
+                    let path = self.basedir.clone();
+                    let uid = self.uid;
+                    let r = self.fs.blocking(move || {
+                        FsQuota::check(&path, Some(uid)).map_err(|_| FsError::GeneralFailure)
+                    }).await?;
+                    debug!("get_quota for {:?}: insert to cache", key);
+                    QCACHE.insert(key, r)
+                }
+            };
+            Ok((r.bytes_used, r.bytes_limit))
+        }
+        .boxed()
     }
 }
