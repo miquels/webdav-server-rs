@@ -1,20 +1,11 @@
 use std::any::Any;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use futures::future::FutureExt;
 use webdav_handler::davpath::DavPath;
 use webdav_handler::fs::*;
 use webdav_handler::localfs::LocalFs;
 
-use crate::cache;
 use crate::suid::UgidSwitch;
-use fs_quota::*;
-use lazy_static::lazy_static;
-
-lazy_static! {
-    static ref QCACHE: cache::Cache<PathBuf, FsQuota> = cache::Cache::new().maxage(Duration::new(30, 0));
-}
 
 #[derive(Clone)]
 pub struct UserFs {
@@ -95,7 +86,18 @@ impl DavFileSystem for UserFs {
         self.fs.copy(from, to)
     }
 
+    #[cfg(feature = "quota")]
     fn get_quota<'a>(&'a self) -> FsFuture<(u64, Option<u64>)> {
+
+        use std::time::Duration;
+        use futures::future::FutureExt;
+        use crate::cache;
+        use fs_quota::*;
+
+        lazy_static::lazy_static! {
+            static ref QCACHE: cache::Cache<PathBuf, FsQuota> = cache::Cache::new().maxage(Duration::new(30, 0));
+        }
+
         async move {
             let mut key = self.basedir.clone();
             key.push(&self.uid.to_string());

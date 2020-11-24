@@ -95,8 +95,6 @@ pub(crate) mod cached {
     //
     // Cached versions of Unix account lookup and Pam auth.
     //
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
     use std::io;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -104,7 +102,6 @@ pub(crate) mod cached {
     use crate::cache;
     use crate::unixuser::{self, User};
     use lazy_static::lazy_static;
-    use pam_sandboxed::{PamAuth, PamError};
 
     struct Timeouts {
         pwcache:  Duration,
@@ -140,6 +137,7 @@ pub(crate) mod cached {
         timeouts.pamcache = Duration::new(secs as u64, 0);
     }
 
+    #[cfg(feature = "pam")]
     pub async fn pam_auth<'a>(
         pam_auth: PamAuth,
         service: &'a str,
@@ -148,6 +146,10 @@ pub(crate) mod cached {
         remip: Option<&'a str>,
     ) -> Result<(), PamError>
     {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        use pam_sandboxed::{PamAuth, PamError};
+
         let mut s = DefaultHasher::new();
         service.hash(&mut s);
         user.hash(&mut s);

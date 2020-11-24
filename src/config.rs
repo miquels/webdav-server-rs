@@ -124,6 +124,7 @@ pub enum Auth {
 
 #[derive(Debug, Clone)]
 pub enum AuthType {
+    #[cfg(feature = "pam")]
     Pam,
     HtPasswd(String),
 }
@@ -202,14 +203,16 @@ pub fn deserialize_authtype<'de, D>(deserializer: D) -> Result<Option<AuthType>,
 where D: Deserializer<'de> {
     let s = String::deserialize(deserializer)?;
     if s.starts_with("htpasswd.") {
-        Ok(Some(AuthType::HtPasswd(s[9..].to_string())))
-    } else if &s == "pam" {
-        Ok(Some(AuthType::Pam))
-    } else if s == "" {
-        Ok(None)
-    } else {
-        Err(serde::de::Error::custom("unknown auth-type"))
+        return Ok(Some(AuthType::HtPasswd(s[9..].to_string())));
     }
+    #[cfg(feature = "pam")]
+    if &s == "pam" {
+        return Ok(Some(AuthType::Pam));
+    }
+    if s == "" {
+        return Ok(None);
+    }
+    Err(serde::de::Error::custom("unknown auth-type"))
 }
 
 pub fn deserialize_opt_enum<'de, D, E>(deserializer: D) -> Result<Option<E>, D::Error>
@@ -265,6 +268,7 @@ pub fn build_routes(cfg: &str, config: &mut Config) -> io::Result<()> {
 }
 
 pub fn check(cfg: &str, config: &Config) {
+    #[cfg(feature = "pam")]
     if let Some(AuthType::Pam) = config.accounts.auth_type {
         if config.pam.service == "" {
             eprintln!("{}: missing section [pam]", cfg);
