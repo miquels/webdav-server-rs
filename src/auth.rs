@@ -1,7 +1,8 @@
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
+use crate::cache;
 use crate::config::{AuthType, Config, Location};
 
 use headers::{authorization::Basic, Authorization, HeaderMapExt};

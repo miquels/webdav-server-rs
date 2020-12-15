@@ -431,9 +431,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Arc::new(config);
 
     // set cache timeouts.
-    if let Some(timeout) = config.pam.cache_timeout {
-        cache::cached::set_pamcache_timeout(timeout);
-    }
     if let Some(timeout) = config.unix.cache_timeout {
         cache::cached::set_pwcache_timeout(timeout);
     }

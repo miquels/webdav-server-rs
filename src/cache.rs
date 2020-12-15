@@ -139,16 +139,15 @@ pub(crate) mod cached {
 
     #[cfg(feature = "pam")]
     pub async fn pam_auth<'a>(
-        pam_auth: PamAuth,
+        pam_auth: pam_sandboxed::PamAuth,
         service: &'a str,
         user: &'a str,
         pass: &'a str,
         remip: Option<&'a str>,
-    ) -> Result<(), PamError>
+    ) -> Result<(), pam_sandboxed::PamError>
     {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        use pam_sandboxed::{PamAuth, PamError};
 
         let mut s = DefaultHasher::new();
         service.hash(&mut s);

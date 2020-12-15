@@ -27,6 +27,18 @@ compiler version is 1.39.
 - partial put support
 - tested with Windows, macOS, Linux clients
 
+## Building.
+
+By default the server builds with **pam** and **quota** support. If your
+OS does not support these one of features, use cargo command line options
+to disable all features and enable only the ones your OS supports.
+
+For example, to build on OpenBSD, which does not have pam:
+
+```
+cargo build --release --no-default-features --features=quota
+```
+
 ## Configuration.
 
 See the [example webdav-server.toml file](webdav-server.toml)
