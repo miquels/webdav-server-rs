@@ -397,7 +397,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if matches.is_present("DBG") {
         use env_logger::Env;
         let level = "webdav_server=debug,webdav_handler=debug";
-        env_logger::from_env(Env::default().default_filter_or(level)).init();
+        env_logger::Builder::from_env(Env::default().default_filter_or(level)).init();
     } else {
         env_logger::init();
     }
