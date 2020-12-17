@@ -74,11 +74,11 @@ fn fstype(tp: &str) -> FsType {
 #[derive(Debug)]
 pub struct FsQuota {
     /// number of bytes used.
-    pub bytes_used: u64,
+    pub bytes_used:  u64,
     /// maximum number of bytes (available - used).
     pub bytes_limit: Option<u64>,
     /// number of files (inodes) in use.
-    pub files_used: u64,
+    pub files_used:  u64,
     /// maximum number of files (available - used).
     pub files_limit: Option<u64>,
 }

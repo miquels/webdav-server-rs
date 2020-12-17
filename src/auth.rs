@@ -18,9 +18,7 @@ pub struct Auth {
 }
 
 impl Auth {
-
     pub fn new(config: Arc<Config>) -> io::Result<Auth> {
-
         // initialize pam.
         #[cfg(feature = "pam")]
         let pam_auth = {
@@ -39,7 +37,13 @@ impl Auth {
     }
 
     // authenticate user.
-    pub async fn auth<'a>(&'a self, req: &'a HttpRequest, location: &Location, _remote_ip: SocketAddr) -> Result<String, StatusCode> {
+    pub async fn auth<'a>(
+        &'a self,
+        req: &'a HttpRequest,
+        location: &Location,
+        _remote_ip: SocketAddr,
+    ) -> Result<String, StatusCode>
+    {
         // we must have a login/pass
         let basic = match req.headers().typed_get::<Authorization<Basic>>() {
             Some(Authorization(basic)) => basic,
@@ -49,7 +53,11 @@ impl Auth {
         let pass = basic.password();
 
         // match the auth type.
-        let auth_type = location.accounts.auth_type.as_ref().or(self.config.accounts.auth_type.as_ref());
+        let auth_type = location
+            .accounts
+            .auth_type
+            .as_ref()
+            .or(self.config.accounts.auth_type.as_ref());
         match auth_type {
             #[cfg(feature = "pam")]
             Some(&AuthType::Pam) => self.auth_pam(req, user, pass, _remote_ip).await,
@@ -63,7 +71,14 @@ impl Auth {
 
     // authenticate user using PAM.
     #[cfg(feature = "pam")]
-    async fn auth_pam<'a>(&'a self, req: &'a HttpRequest, user: &'a str, pass: &'a str, remote_ip: SocketAddr) -> Result<String, StatusCode> {
+    async fn auth_pam<'a>(
+        &'a self,
+        req: &'a HttpRequest,
+        user: &'a str,
+        pass: &'a str,
+        remote_ip: SocketAddr,
+    ) -> Result<String, StatusCode>
+    {
         // stringify the remote IP address.
         let ip = remote_ip.ip();
         let ip_string = if ip.is_loopback() {
@@ -88,15 +103,23 @@ impl Auth {
         match cache::cached::pam_auth(pam_auth, service, user, pass, ip_ref).await {
             Ok(_) => Ok(user.to_string()),
             Err(_) => {
-                debug!("auth_pam({}): authentication for {} ({:?}) failed", service, user, ip_ref);
+                debug!(
+                    "auth_pam({}): authentication for {} ({:?}) failed",
+                    service, user, ip_ref
+                );
                 Err(StatusCode::UNAUTHORIZED)
             },
         }
     }
 
     // authenticate user using htpasswd.
-    async fn auth_htpasswd<'a>(&'a self, user: &'a str, pass: &'a str, section: &'a str) -> Result<String, StatusCode> {
-
+    async fn auth_htpasswd<'a>(
+        &'a self,
+        user: &'a str,
+        pass: &'a str,
+        section: &'a str,
+    ) -> Result<String, StatusCode>
+    {
         // Get the htpasswd.WHATEVER section from the config file.
         let file = match self.config.htpasswd.get(section) {
             Some(section) => section.htpasswd.as_str(),
@@ -112,7 +135,10 @@ impl Auth {
                     return Err(StatusCode::UNAUTHORIZED);
                 },
             };
-            let lines = data.split('\n').map(|s| s.trim()).filter(|s| !s.starts_with("#") && !s.is_empty());
+            let lines = data
+                .split('\n')
+                .map(|s| s.trim())
+                .filter(|s| !s.starts_with("#") && !s.is_empty());
 
             // Check each line for a match.
             for line in lines {

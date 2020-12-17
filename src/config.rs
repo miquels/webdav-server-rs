@@ -14,28 +14,28 @@ use crate::router::Router;
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
-    pub server: Server,
+    pub server:   Server,
     #[serde(default)]
     pub accounts: Accounts,
     #[serde(default)]
-    pub pam: Pam,
+    pub pam:      Pam,
     #[serde(default)]
     pub htpasswd: HashMap<String, HtPasswd>,
     #[serde(default)]
-    pub unix: Unix,
+    pub unix:     Unix,
     #[serde(default)]
     pub location: Vec<Location>,
     #[serde(skip)]
-    pub router: Router<usize>,
+    pub router:   Router<usize>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Server {
-    pub listen: OneOrManyAddr,
+    pub listen:         OneOrManyAddr,
     //#[serde(deserialize_with = "deserialize_user", default)]
-    pub uid: Option<u32>,
+    pub uid:            Option<u32>,
     //#[serde(deserialize_with = "deserialize_group", default)]
-    pub gid: Option<u32>,
+    pub gid:            Option<u32>,
     #[serde(default)]
     pub identification: Option<String>,
 }
@@ -47,15 +47,15 @@ pub struct Accounts {
     #[serde(rename = "acct-type", deserialize_with = "deserialize_opt_enum", default)]
     pub acct_type: Option<AcctType>,
     #[serde(default)]
-    pub realm: Option<String>,
+    pub realm:     Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct Pam {
-    pub service: String,
+    pub service:       String,
     #[serde(rename = "cache-timeout")]
     pub cache_timeout: Option<usize>,
-    pub threads: Option<usize>,
+    pub threads:       Option<usize>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -68,32 +68,32 @@ pub struct Unix {
     #[serde(rename = "cache-timeout")]
     pub cache_timeout: Option<usize>,
     #[serde(rename = "min-uid", default)]
-    pub min_uid: Option<u32>,
+    pub min_uid:       Option<u32>,
     #[serde(rename = "supplementary-groups", default)]
-    pub aux_groups: bool,
+    pub aux_groups:    bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Location {
     #[serde(default)]
-    pub route: Vec<String>,
+    pub route:            Vec<String>,
     #[serde(deserialize_with = "deserialize_methodset", default)]
-    pub methods: Option<DavMethodSet>,
+    pub methods:          Option<DavMethodSet>,
     #[serde(deserialize_with = "deserialize_opt_enum", default)]
-    pub auth: Option<Auth>,
+    pub auth:             Option<Auth>,
     #[serde(default, flatten)]
-    pub accounts: Accounts,
+    pub accounts:         Accounts,
     #[serde(deserialize_with = "deserialize_enum")]
-    pub handler: Handler,
+    pub handler:          Handler,
     #[serde(default)]
-    pub setuid: bool,
-    pub directory: String,
+    pub setuid:           bool,
+    pub directory:        String,
     #[serde(default)]
-    pub hide_symlinks: Option<bool>,
+    pub hide_symlinks:    Option<bool>,
     #[serde(default)]
-    pub indexfile: Option<String>,
+    pub indexfile:        Option<String>,
     #[serde(default)]
-    pub autoindex: bool,
+    pub autoindex:        bool,
     #[serde(
         rename = "case-insensitive",
         deserialize_with = "deserialize_opt_enum",
@@ -101,7 +101,7 @@ pub struct Location {
     )]
     pub case_insensitive: Option<CaseInsensitive>,
     #[serde(deserialize_with = "deserialize_opt_enum", default)]
-    pub on_notfound: Option<OnNotfound>,
+    pub on_notfound:      Option<OnNotfound>,
 }
 
 #[derive(FromStr, Debug, Clone, Copy)]

@@ -53,9 +53,9 @@ static PROGNAME: &'static str = "webdav-server";
 // Contains "state" and a handle to the config.
 #[derive(Clone)]
 struct Server {
-    dh:       DavHandler,
-    auth:     auth::Auth,
-    config:   Arc<config::Config>,
+    dh:     DavHandler,
+    auth:   auth::Auth,
+    config: Arc<config::Config>,
 }
 
 type HttpResult = Result<hyper::Response<webdav_handler::body::Body>, io::Error>;
@@ -87,7 +87,11 @@ impl Server {
         };
 
         // If account is not set, fine.
-        let acct_type = location.accounts.acct_type.as_ref().or(self.config.accounts.acct_type.as_ref());
+        let acct_type = location
+            .accounts
+            .acct_type
+            .as_ref()
+            .or(self.config.accounts.acct_type.as_ref());
         match acct_type {
             Some(&AcctType::Unix) => {},
             None => return Ok(None),
@@ -105,10 +109,7 @@ impl Server {
         // check minimum uid
         if let Some(min_uid) = self.config.unix.min_uid {
             if pwd.uid < min_uid {
-                debug!(
-                    "acct: {}: uid {} too low (<{})",
-                    pwd.name, pwd.uid, min_uid
-                );
+                debug!("acct: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
                 return Err(StatusCode::FORBIDDEN);
             }
         }
@@ -306,9 +307,7 @@ impl Server {
         };
         let fs = match location.handler {
             Handler::Virtroot => {
-                let auth_user = auth_user
-                    .as_ref()
-                    .map(String::to_owned);
+                let auth_user = auth_user.as_ref().map(String::to_owned);
                 RootFs::new(dir, auth_user, auth_ugid) as Box<dyn DavFileSystem>
             },
             Handler::Filesystem => {
@@ -350,18 +349,9 @@ impl Server {
             .status(code)
             .header("Content-Type", "text/xml");
         if code == StatusCode::UNAUTHORIZED {
-            let realm = location.and_then(|location|
-                location
-                .accounts
-                .realm.as_ref());
-            let realm = realm.or(self
-                .config
-                .accounts
-                .realm
-                .as_ref());
-            let realm = realm
-                .map(|s| s.as_str())
-                .unwrap_or("Webdav Server");
+            let realm = location.and_then(|location| location.accounts.realm.as_ref());
+            let realm = realm.or(self.config.accounts.realm.as_ref());
+            let realm = realm.map(|s| s.as_str()).unwrap_or("Webdav Server");
             response = response.header("WWW-Authenticate", format!("Basic realm=\"{}\"", realm).as_str());
         }
         Ok(response.body(msg.into()).unwrap())
@@ -547,7 +537,7 @@ fn expand_directory(dir: &str, pwd: Option<&Arc<unixuser::User>>) -> Result<Stri
         None => {
             debug!("expand_directory: cannot expand {}: no account", dir);
             return Err(StatusCode::NOT_FOUND);
-        }
+        },
     };
     let homedir = pwd.dir.to_str().ok_or(StatusCode::NOT_FOUND)?;
     Ok(format!("{}/{}", homedir, &dir[1..]))

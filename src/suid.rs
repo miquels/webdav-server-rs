@@ -9,14 +9,14 @@ mod setuid {
     // import the 32-bit variant.
     #[cfg(target_arch = "x86")]
     mod uid32 {
-        pub use libc::SYS_setresuid32 as SYS_setresuid;
-        pub use libc::SYS_setresgid32 as SYS_setresgid;
-        pub use libc::SYS_setgroups32 as SYS_setgroups;
         pub use libc::SYS_getgroups32 as SYS_getgroups;
+        pub use libc::SYS_setgroups32 as SYS_setgroups;
+        pub use libc::SYS_setresgid32 as SYS_setresgid;
+        pub use libc::SYS_setresuid32 as SYS_setresuid;
     }
     #[cfg(not(target_arch = "x86"))]
     mod uid32 {
-        pub use libc::{SYS_setresuid, SYS_setresgid, SYS_setgroups, SYS_getgroups};
+        pub use libc::{SYS_getgroups, SYS_setgroups, SYS_setresgid, SYS_setresuid};
     }
     use self::uid32::*;
     use std::cell::RefCell;
@@ -27,10 +27,10 @@ mod setuid {
 
     // current credentials of this thread.
     struct UgidState {
-        ruid: u32,
-        euid: u32,
-        rgid: u32,
-        egid: u32,
+        ruid:   u32,
+        euid:   u32,
+        rgid:   u32,
+        egid:   u32,
         groups: Vec<u32>,
     }
 
@@ -38,10 +38,10 @@ mod setuid {
         fn new() -> UgidState {
             super::THREAD_SWITCH_UGID_USED.store(true, Ordering::Release);
             UgidState {
-                ruid: unsafe { libc::getuid() } as u32,
-                euid: unsafe { libc::geteuid() } as u32,
-                rgid: unsafe { libc::getgid() } as u32,
-                egid: unsafe { libc::getegid() } as u32,
+                ruid:   unsafe { libc::getuid() } as u32,
+                euid:   unsafe { libc::geteuid() } as u32,
+                rgid:   unsafe { libc::getgid() } as u32,
+                egid:   unsafe { libc::getegid() } as u32,
                 groups: getgroups().expect("UgidState::new"),
             }
         }
@@ -49,7 +49,13 @@ mod setuid {
 
     fn getgroups() -> io::Result<Vec<u32>> {
         // get number of groups.
-        let size = unsafe { libc::syscall(SYS_getgroups, 0 as libc::c_int, std::ptr::null_mut::<libc::gid_t>()) };
+        let size = unsafe {
+            libc::syscall(
+                SYS_getgroups,
+                0 as libc::c_int,
+                std::ptr::null_mut::<libc::gid_t>(),
+            )
+        };
         if size < 0 {
             return Err(oserr(size, "getgroups(0, NULL)"));
         }
@@ -57,16 +63,17 @@ mod setuid {
         // get groups.
         let mut groups = Vec::<u32>::with_capacity(size as usize);
         groups.resize(size as usize, 0);
-        let res = unsafe {
-            libc::syscall(SYS_getgroups, size as libc::c_int, groups.as_mut_ptr() as *mut _)
-        };
+        let res = unsafe { libc::syscall(SYS_getgroups, size as libc::c_int, groups.as_mut_ptr() as *mut _) };
 
         // sanity check.
         if res != size {
             if res < 0 {
                 return Err(oserr(res, format!("getgroups({}, buffer)", size)));
             }
-            return Err(io::Error::new(io::ErrorKind::Other, format!("getgroups({}, buffer): returned {}", size, res)));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("getgroups({}, buffer): returned {}", size, res),
+            ));
         }
 
         Ok(groups)
@@ -118,7 +125,6 @@ mod setuid {
 
             // Check if anything changed.
             if newuid != cur.euid || newgid != cur.egid || groups_changed {
-
                 // See if we have to switch to root privs first.
                 if cur.euid != 0 && (newuid != cur.ruid || newgid != cur.rgid || groups_changed) {
                     // Must first switch to root.
@@ -201,12 +207,16 @@ pub struct UgidSwitchGuard {
 impl UgidSwitch {
     pub fn new(creds: Option<(u32, u32, &[u32])>) -> UgidSwitch {
         let target_creds = match creds {
-            Some((uid, gid, groups)) => Some(UgidCreds { uid, gid, groups: groups.into() }),
+            Some((uid, gid, groups)) => {
+                Some(UgidCreds {
+                    uid,
+                    gid,
+                    groups: groups.into(),
+                })
+            },
             None => None,
         };
-        UgidSwitch {
-            target_creds
-        }
+        UgidSwitch { target_creds }
     }
 
     #[allow(dead_code)]
@@ -287,4 +297,3 @@ pub fn proc_switch_ugid(uid: u32, gid: u32, keep_privs: bool) {
 pub fn have_suid_privs() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
-

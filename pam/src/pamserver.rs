@@ -4,8 +4,8 @@
 // This is all old-fashioned blocking and thread-based code.
 //
 use std::io::{self, Read, Write};
-use std::os::unix::net::UnixStream as StdUnixStream;
 use std::os::unix::io::AsRawFd;
+use std::os::unix::net::UnixStream as StdUnixStream;
 use std::sync::{Arc, Mutex};
 
 use bincode::{deserialize, serialize};
@@ -44,7 +44,9 @@ impl PamServer {
                 // first, close all filedescriptors (well, all..)
                 for fdno in 3..8192 {
                     if fdno != sock2.as_raw_fd() && fdno != sock3.as_raw_fd() {
-                        unsafe { libc::close(fdno); }
+                        unsafe {
+                            libc::close(fdno);
+                        }
                     }
                 }
                 let mut server = PamServer {

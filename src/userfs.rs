@@ -88,11 +88,10 @@ impl DavFileSystem for UserFs {
 
     #[cfg(feature = "quota")]
     fn get_quota<'a>(&'a self) -> FsFuture<(u64, Option<u64>)> {
-
-        use std::time::Duration;
-        use futures::future::FutureExt;
         use crate::cache;
         use fs_quota::*;
+        use futures::future::FutureExt;
+        use std::time::Duration;
 
         lazy_static::lazy_static! {
             static ref QCACHE: cache::Cache<PathBuf, FsQuota> = cache::Cache::new().maxage(Duration::new(30, 0));
@@ -109,12 +108,15 @@ impl DavFileSystem for UserFs {
                 None => {
                     let path = self.basedir.clone();
                     let uid = self.uid;
-                    let r = self.fs.blocking(move || {
-                        FsQuota::check(&path, Some(uid)).map_err(|_| FsError::GeneralFailure)
-                    }).await?;
+                    let r = self
+                        .fs
+                        .blocking(move || {
+                            FsQuota::check(&path, Some(uid)).map_err(|_| FsError::GeneralFailure)
+                        })
+                        .await?;
                     debug!("get_quota for {:?}: insert to cache", key);
                     QCACHE.insert(key, r)
-                }
+                },
             };
             Ok((r.bytes_used, r.bytes_limit))
         }

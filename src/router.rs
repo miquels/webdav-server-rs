@@ -107,15 +107,18 @@ impl<T: Debug> Builder<T> {
         // the entire string.
         let re_route = route
             .chars()
-            .map(|c| match c {
-                '*' => '\u{e001}',
-                '(' => '\u{e002}',
-                ')' => '\u{e003}',
-                '\u{e001}' => ' ',
-                '\u{e002}' => ' ',
-                '\u{e003}' => ' ',
-                c => c,
-            }).collect::<String>();
+            .map(|c| {
+                match c {
+                    '*' => '\u{e001}',
+                    '(' => '\u{e002}',
+                    ')' => '\u{e003}',
+                    '\u{e001}' => ' ',
+                    '\u{e002}' => ' ',
+                    '\u{e003}' => ' ',
+                    c => c,
+                }
+            })
+            .collect::<String>();
         let re_route = regex::escape(&re_route);
 
         // Translate route expression into regexp.
@@ -222,14 +225,20 @@ mod tests {
     use webdav_handler::DavMethod;
 
     fn test_match(rtr: &Router<usize>, p: &[u8], user: &str, path: &str) {
-        let x = rtr.matches(p, DavMethod::Get, &[ "user", "path" ]);
+        let x = rtr.matches(p, DavMethod::Get, &["user", "path"]);
         assert!(x.len() > 0);
         let x = &x[0];
         if user != "" {
-            assert!(x.params[0].as_ref().map(|b| b.as_bytes() == user.as_bytes()).unwrap_or(false));
+            assert!(x.params[0]
+                .as_ref()
+                .map(|b| b.as_bytes() == user.as_bytes())
+                .unwrap_or(false));
         }
         if path != "" {
-            assert!(x.params[1].as_ref().map(|b| b.as_bytes() == path.as_bytes()).unwrap_or(false));
+            assert!(x.params[1]
+                .as_ref()
+                .map(|b| b.as_bytes() == path.as_bytes())
+                .unwrap_or(false));
         }
     }
 
