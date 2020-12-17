@@ -172,11 +172,11 @@ pub(crate) mod cached {
         }
     }
 
-    pub async fn unixuser(username: &str) -> Result<Arc<User>, io::Error> {
+    pub async fn unixuser(username: &str, with_groups: bool) -> Result<Arc<User>, io::Error> {
         if let Some(pwd) = PWCACHE.get(username) {
             return Ok(pwd);
         }
-        match User::by_name_async(username).await {
+        match User::by_name_async(username, with_groups).await {
             Err(e) => Err(e),
             Ok(pwd) => Ok(PWCACHE.insert(username.to_owned(), pwd)),
         }

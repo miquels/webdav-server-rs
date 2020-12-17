@@ -19,11 +19,11 @@ pub struct RootFs {
 }
 
 impl RootFs {
-    pub fn new<P>(dir: P, user: Option<String>, ugid: Option<(u32, u32)>) -> Box<RootFs>
+    pub fn new<P>(dir: P, user: Option<String>, creds: Option<(u32, u32, &[u32])>) -> Box<RootFs>
     where P: AsRef<Path> + Clone {
         Box::new(RootFs {
             user: user.unwrap_or("".to_string()),
-            fs:   *UserFs::new(dir, ugid, false, false, true),
+            fs:   *UserFs::new(dir, creds, false, false, true),
         })
     }
 }

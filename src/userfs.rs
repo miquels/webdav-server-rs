@@ -17,17 +17,17 @@ pub struct UserFs {
 impl UserFs {
     pub fn new(
         dir: impl AsRef<Path>,
-        target_ugid: Option<(u32, u32)>,
+        target_creds: Option<(u32, u32, &[u32])>,
         public: bool,
         case_insensitive: bool,
         macos: bool,
     ) -> Box<UserFs>
     {
         // uid is used for quota() calls.
-        let uid = target_ugid.as_ref().map(|ugid| ugid.0).unwrap_or(0);
+        let uid = target_creds.as_ref().map(|ugid| ugid.0).unwrap_or(0);
 
         // set up the LocalFs hooks for uid switching.
-        let switch = UgidSwitch::new(target_ugid.clone());
+        let switch = UgidSwitch::new(target_creds.clone());
         let blocking_guard = Box::new(move || Box::new(switch.guard()) as Box<dyn Any>);
 
         Box::new(UserFs {

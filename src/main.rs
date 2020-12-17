@@ -45,7 +45,7 @@ use webdav_handler::{fakels::FakeLs, fs::DavFileSystem, ls::DavLockSystem};
 use crate::config::{AcctType, Auth, CaseInsensitive, Handler, Location, OnNotfound};
 use crate::rootfs::RootFs;
 use crate::router::MatchedRoute;
-use crate::suid::switch_ugid;
+use crate::suid::proc_switch_ugid;
 use crate::userfs::UserFs;
 
 static PROGNAME: &'static str = "webdav-server";
@@ -94,7 +94,7 @@ impl Server {
         };
 
         // check if user exists.
-        let pwd = match cache::cached::unixuser(user).await {
+        let pwd = match cache::cached::unixuser(user, self.config.unix.aux_groups).await {
             Ok(pwd) => pwd,
             Err(_) => {
                 debug!("acct: unix: user {} not found", user);
@@ -300,7 +300,7 @@ impl Server {
 
         // Get the filesystem.
         let auth_ugid = if location.setuid {
-            pwd.as_ref().map(|p| (p.uid, p.gid))
+            pwd.as_ref().map(|p| (p.uid, p.gid, p.groups.as_slice()))
         } else {
             None
         };
@@ -500,7 +500,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     exit(1);
                 }
-                switch_ugid(uid, gid);
+                let keep_privs = config.location.iter().any(|l| l.setuid);
+                proc_switch_ugid(uid, gid, keep_privs);
             },
             _ => {},
         }

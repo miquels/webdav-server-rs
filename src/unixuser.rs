@@ -4,8 +4,6 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use libc;
-use libc::{c_char, getpwnam_r, getpwuid_r};
 use tokio::task::block_in_place;
 
 #[derive(Debug)]
@@ -15,20 +13,21 @@ pub struct User {
     pub gecos:  String,
     pub uid:    u32,
     pub gid:    u32,
+    pub groups: Vec<u32>,
     pub dir:    PathBuf,
     pub shell:  PathBuf,
 }
 
-unsafe fn cptr_to_osstr<'a>(c: *const c_char) -> &'a OsStr {
+unsafe fn cptr_to_osstr<'a>(c: *const libc::c_char) -> &'a OsStr {
     let bytes = CStr::from_ptr(c).to_bytes();
     OsStr::from_bytes(&bytes)
 }
 
-unsafe fn cptr_to_path<'a>(c: *const c_char) -> &'a Path {
+unsafe fn cptr_to_path<'a>(c: *const libc::c_char) -> &'a Path {
     Path::new(cptr_to_osstr(c))
 }
 
-unsafe fn to_passwd(pwd: &libc::passwd) -> User {
+unsafe fn to_user(pwd: &libc::passwd) -> User {
     // turn into (unsafe!) rust slices
     let cs_name = CStr::from_ptr(pwd.pw_name);
     let cs_passwd = CStr::from_ptr(pwd.pw_passwd);
@@ -45,12 +44,13 @@ unsafe fn to_passwd(pwd: &libc::passwd) -> User {
         shell:  cs_shell.to_path_buf(),
         uid:    pwd.pw_uid,
         gid:    pwd.pw_gid,
+        groups: Vec::new(),
     }
 }
 
 impl User {
-    pub fn by_name(name: &str) -> Result<User, io::Error> {
-        let mut buf = [0; 1024];
+    pub fn by_name(name: &str, with_groups: bool) -> Result<User, io::Error> {
+        let mut buf = [0u8; 1024];
         let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
         let mut result: *mut libc::passwd = std::ptr::null_mut();
 
@@ -59,26 +59,50 @@ impl User {
             Err(_) => return Err(io::Error::from_raw_os_error(libc::ENOENT)),
         };
         let ret = unsafe {
-            getpwnam_r(
+            libc::getpwnam_r(
                 cname.as_ptr(),
                 &mut pwd as *mut _,
-                buf.as_mut_ptr(),
+                buf.as_mut_ptr() as *mut _,
                 buf.len() as libc::size_t,
                 &mut result as *mut _,
             )
         };
-        if ret == 0 {
-            if result.is_null() {
-                return Err(io::Error::from_raw_os_error(libc::ENOENT));
-            }
-            let p = unsafe { to_passwd(&pwd) };
-            Ok(p)
-        } else {
-            Err(io::Error::from_raw_os_error(ret))
+
+        if ret != 0 {
+            return Err(io::Error::from_raw_os_error(ret));
         }
+        if result.is_null() {
+            return Err(io::Error::from_raw_os_error(libc::ENOENT));
+        }
+        let mut user = unsafe { to_user(&pwd) };
+
+        if with_groups {
+            let mut ngroups = (buf.len() / std::mem::size_of::<libc::gid_t>()) as libc::c_int;
+            let ret = unsafe {
+                libc::getgrouplist(
+                    cname.as_ptr(),
+                    user.gid as libc::gid_t,
+                    buf.as_mut_ptr() as *mut _,
+                    &mut ngroups as *mut _,
+                )
+            };
+            if ret >= 0 && ngroups > 0 {
+                let mut groups_vec = Vec::with_capacity(ngroups as usize);
+                let groups = unsafe {
+                    std::slice::from_raw_parts(buf.as_ptr() as *const libc::gid_t, ngroups as usize)
+                };
+                //
+                // Only supplementary or auxilary groups, filter out primary.
+                //
+                groups_vec.extend(groups.iter().map(|&g| g as u32).filter(|&g| g != user.gid));
+                user.groups = groups_vec;
+            }
+        }
+
+        Ok(user)
     }
 
-    #[allow(dead_code)]
+    /*
     pub fn by_uid(uid: u32) -> Result<User, io::Error> {
         let mut buf = [0; 1024];
         let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
@@ -97,14 +121,15 @@ impl User {
             if result.is_null() {
                 return Err(io::Error::from_raw_os_error(libc::ENOENT));
             }
-            let p = unsafe { to_passwd(&pwd) };
+            let p = unsafe { to_user(&pwd) };
             Ok(p)
         } else {
             Err(io::Error::from_raw_os_error(ret))
         }
     }
+    */
 
-    pub async fn by_name_async(name: &str) -> Result<User, io::Error> {
-        block_in_place(move || User::by_name(name))
+    pub async fn by_name_async(name: &str, with_groups: bool) -> Result<User, io::Error> {
+        block_in_place(move || User::by_name(name, with_groups))
     }
 }

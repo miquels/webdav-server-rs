@@ -69,6 +69,8 @@ pub struct Unix {
     pub cache_timeout: Option<usize>,
     #[serde(rename = "min-uid", default)]
     pub min_uid: Option<u32>,
+    #[serde(rename = "supplementary-groups", default)]
+    pub aux_groups: bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
