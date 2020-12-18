@@ -132,6 +132,7 @@ pub(crate) mod cached {
         timeouts.pwcache = Duration::new(secs as u64, 0);
     }
 
+    #[cfg(feature = "pam")]
     pub(crate) fn set_pamcache_timeout(secs: usize) {
         let mut timeouts = TIMEOUTS.lock().unwrap();
         timeouts.pamcache = Duration::new(secs as u64, 0);

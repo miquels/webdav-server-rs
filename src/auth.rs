@@ -1,8 +1,7 @@
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::cache;
 use crate::config::{AuthType, Config, Location};
 
 use headers::{authorization::Basic, Authorization, HeaderMapExt};
@@ -24,7 +23,7 @@ impl Auth {
         let pam_auth = {
             // set cache timeouts.
             if let Some(timeout) = config.pam.cache_timeout {
-                cache::cached::set_pamcache_timeout(timeout);
+                crate::cache::cached::set_pamcache_timeout(timeout);
             }
             pam_sandboxed::PamAuth::new(config.pam.threads.clone())?
         };
@@ -91,8 +90,8 @@ impl Auth {
                 .map(|s| s.trim().to_owned())
         } else {
             Some(match ip {
-                IpAddr::V4(ip) => ip.to_string(),
-                IpAddr::V6(ip) => ip.to_string(),
+                std::net::IpAddr::V4(ip) => ip.to_string(),
+                std::net::IpAddr::V6(ip) => ip.to_string(),
             })
         };
         let ip_ref = ip_string.as_ref().map(|s| s.as_str());
@@ -100,7 +99,7 @@ impl Auth {
         // authenticate.
         let service = self.config.pam.service.as_str();
         let pam_auth = self.pam_auth.clone();
-        match cache::cached::pam_auth(pam_auth, service, user, pass, ip_ref).await {
+        match crate::cache::cached::pam_auth(pam_auth, service, user, pass, ip_ref).await {
             Ok(_) => Ok(user.to_string()),
             Err(_) => {
                 debug!(
