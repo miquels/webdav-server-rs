@@ -69,6 +69,6 @@ time = "0.1.42"
 tokio = { version = "0.2.4", features = ["full"] }
 toml = "0.5.7"
 url = "2.2.0"
-#webdav-handler = { path = "../webdav-handler-rs", version = "=0.2.0-alpha.4" }
-webdav-handler = "=0.2.0-alpha.4"
+#webdav-handler = { path = "../webdav-handler-rs", version = "=0.2.0-alpha.5" }
+webdav-handler = "=0.2.0-alpha.5"
 pwhash = "0.3.1"
