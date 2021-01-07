@@ -374,6 +374,7 @@ impl Server {
     }
 }
 
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // command line option processing.
     let matches = clap_app!(webdav_server =>
@@ -393,7 +394,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let port = matches.value_of("PORT");
-    let cfg = matches.value_of("CFG").unwrap_or("/etc/webdav-server.toml");
+    let cfg = matches.value_of("CFG").unwrap_or("/Users/sjpark/webdav-server-rs/webdav-server.toml");
 
     // read config.
     let mut config = match config::read(cfg.clone()) {
