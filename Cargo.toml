@@ -19,7 +19,7 @@ categories = ["filesystem"]
 
 [workspace]
 
-#[features]
+[features]
 # By default, the "pam" and "quota" features are enabled.
 #
 # Some systems do not have pam (like OpenBSD), so to compile this
@@ -32,15 +32,6 @@ categories = ["filesystem"]
 # dependencies for the feature.
 # pam = [ "pam-sandboxed" ]
 # quota = [ "fs-quota" ]
-
-[target.'cfg(unix)'.features]
-default = [ "pam", "quota" ]
-
-pam = [ "pam-sandboxed" ]
-quota = [ "fs-quota" ]
-
-[target.'cfg(windows)'.features]
-default = [ ]
 
 # Include debug info in release builds.
 [profile.release]
