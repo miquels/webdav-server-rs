@@ -1,7 +1,11 @@
+#![cfg_attr(target_os = "windows", allow(unused_imports))]
 use std;
 use std::ffi::{CStr, OsStr};
 use std::io;
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(target_os = "windows")]
+use {std::ffi::OsString, std::os::windows::prelude::*};
 use std::path::{Path, PathBuf};
 
 use tokio::task::block_in_place;
@@ -18,15 +22,27 @@ pub struct User {
     pub shell:  PathBuf,
 }
 
+#[cfg(not(target_os = "windows"))]
 unsafe fn cptr_to_osstr<'a>(c: *const libc::c_char) -> &'a OsStr {
     let bytes = CStr::from_ptr(c).to_bytes();
     OsStr::from_bytes(&bytes)
 }
+#[cfg(target_os = "windows")]
+unsafe fn cptr_to_osstr(c: *const libc::c_char) -> OsString {
+    let bytes = CStr::from_ptr(c).to_bytes();
+    OsString::from(String::from_utf8(bytes.to_vec()).unwrap())
+}
 
+#[cfg(not(target_os = "windows"))]
 unsafe fn cptr_to_path<'a>(c: *const libc::c_char) -> &'a Path {
     Path::new(cptr_to_osstr(c))
 }
+#[cfg(target_os = "windows")]
+unsafe fn cptr_to_path(c: *const libc::c_char) -> PathBuf {
+    PathBuf::from(cptr_to_osstr(c))
+}
 
+#[cfg(not(target_os = "windows"))]
 unsafe fn to_user(pwd: &libc::passwd) -> User {
     // turn into (unsafe!) rust slices
     let cs_name = CStr::from_ptr(pwd.pw_name);
@@ -48,6 +64,7 @@ unsafe fn to_user(pwd: &libc::passwd) -> User {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 impl User {
     pub fn by_name(name: &str, with_groups: bool) -> Result<User, io::Error> {
         let mut buf = [0u8; 1024];

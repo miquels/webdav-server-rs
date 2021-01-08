@@ -1,3 +1,4 @@
+#![cfg_attr(target_os = "windows", allow(unused_imports))]
 use std::borrow::Borrow;
 use std::cmp::Eq;
 use std::collections::vec_deque::VecDeque;
@@ -173,6 +174,7 @@ pub(crate) mod cached {
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
     pub async fn unixuser(username: &str, with_groups: bool) -> Result<Arc<User>, io::Error> {
         if let Some(pwd) = PWCACHE.get(username) {
             return Ok(pwd);

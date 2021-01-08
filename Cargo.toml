@@ -19,7 +19,7 @@ categories = ["filesystem"]
 
 [workspace]
 
-[features]
+#[features]
 # By default, the "pam" and "quota" features are enabled.
 #
 # Some systems do not have pam (like OpenBSD), so to compile this
@@ -27,11 +27,20 @@ categories = ["filesystem"]
 #
 #     cargo build --release --no-default-features --features=quota
 #
-default = [ "pam", "quota" ]
+# default = [ "pam", "quota" ]
 
 # dependencies for the feature.
+# pam = [ "pam-sandboxed" ]
+# quota = [ "fs-quota" ]
+
+[target.'cfg(unix)'.features]
+default = [ "pam", "quota" ]
+
 pam = [ "pam-sandboxed" ]
 quota = [ "fs-quota" ]
+
+[target.'cfg(windows)'.features]
+default = [ ]
 
 # Include debug info in release builds.
 [profile.release]
@@ -50,7 +59,7 @@ clap = "2.33.3"
 enum_from_str = "0.1.0"
 enum_from_str_derive = "0.1.0"
 env_logger = "0.8.2"
-fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
+# fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
 futures = "0.3.8"
 handlebars = "2.0.4"
 headers = "0.3.2"
@@ -60,7 +69,7 @@ lazy_static = "1.4.0"
 libc = "0.2.81"
 log = "0.4.11"
 net2 = "0.2.37"
-pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
+# pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
 percent-encoding = "2.1.0"
 regex = "1.4.2"
 serde = { version = "1.0.118", features = ["derive"] }
@@ -70,5 +79,11 @@ tokio = { version = "0.2.4", features = ["full"] }
 toml = "0.5.7"
 url = "2.2.0"
 #webdav-handler = { path = "../webdav-handler-rs", version = "=0.2.0-alpha.5" }
+#webdav-handler = { path = "webdav-handler-rs", version = "=0.2.0-alpha.5" }
 webdav-handler = "=0.2.0-alpha.5"
 pwhash = "0.3.1"
+
+[target.'cfg(unix)'.dependencies]
+fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
+pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
+

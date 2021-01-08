@@ -258,6 +258,7 @@ pub fn proc_switch_ugid(uid: u32, gid: u32, keep_privs: bool) {
         io::Error::last_os_error()
     }
 
+    #[cfg(not(target_os = "windows"))]
     unsafe {
         // first get full root privs (real, effective, and saved uids)
         if libc::setuid(0) != 0 {
@@ -265,10 +266,10 @@ pub fn proc_switch_ugid(uid: u32, gid: u32, keep_privs: bool) {
         }
 
         // set real uid, and keep effective uid at 0.
-        //#[cfg(not(any(target_os = "openbsd", target_os = "freebsd")))]
-        // if libc::setreuid(uid, 0) != 0 {
-        //     panic!("libc::setreuid({}, 0): {:?}", uid, last_os_error());
-        // }
+        #[cfg(not(any(target_os = "openbsd", target_os = "freebsd")))]
+        if libc::setreuid(uid, 0) != 0 {
+            panic!("libc::setreuid({}, 0): {:?}", uid, last_os_error());
+        }
         #[cfg(any(target_os = "openbsd", target_os = "freebsd"))]
         if libc::setresuid(uid, 0, 0) != 0 {
             panic!("libc::setreuid({}, 0): {:?}", uid, last_os_error());
@@ -296,9 +297,14 @@ pub fn proc_switch_ugid(uid: u32, gid: u32, keep_privs: bool) {
             }
         }
     }
+    #[cfg(target_os = "windows")]
+    panic!()
 }
 
 /// Do we have sufficient privs to switch uids?
 pub fn have_suid_privs() -> bool {
-    unsafe { libc::geteuid() == 0 }
+    #[cfg(not(target_os = "windows"))]
+        unsafe { libc::geteuid() == 0 }
+    #[cfg(target_os = "windows")]
+    panic!()
 }

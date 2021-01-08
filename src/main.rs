@@ -97,23 +97,28 @@ impl Server {
             None => return Ok(None),
         };
 
-        // check if user exists.
-        let pwd = match cache::cached::unixuser(user, self.config.unix.aux_groups).await {
-            Ok(pwd) => pwd,
-            Err(_) => {
-                debug!("acct: unix: user {} not found", user);
-                return Err(StatusCode::UNAUTHORIZED);
-            },
-        };
+        #[cfg(target_os = "windows")]
+            panic!();
+        #[cfg(not(target_os = "windows"))]
+        {
+            // check if user exists.
+            let pwd = match cache::cached::unixuser(user, self.config.unix.aux_groups).await {
+                Ok(pwd) => pwd,
+                Err(_) => {
+                    debug!("acct: unix: user {} not found", user);
+                    return Err(StatusCode::UNAUTHORIZED);
+                },
+            };
 
-        // check minimum uid
-        if let Some(min_uid) = self.config.unix.min_uid {
-            if pwd.uid < min_uid {
-                debug!("acct: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
-                return Err(StatusCode::FORBIDDEN);
+            // check minimum uid
+            if let Some(min_uid) = self.config.unix.min_uid {
+                if pwd.uid < min_uid {
+                    debug!("acct: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
+                    return Err(StatusCode::FORBIDDEN);
+                }
             }
+            Ok(Some(pwd))
         }
-        Ok(Some(pwd))
     }
 
     // return a new response::Builder with the Server: header set.
@@ -394,7 +399,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let port = matches.value_of("PORT");
-    let cfg = matches.value_of("CFG").unwrap_or("/Users/sjpark/webdav-server-rs/webdav-server.toml");
+    #[cfg(not(target_os = "windows"))]
+    let cfg = matches.value_of("CFG").unwrap_or(".\\webdav-server.toml");
+    #[cfg(target_os = "windows")]
+    let cfg = matches.value_of("CFG").unwrap_or(".\\webdav-windows.toml");
 
     // read config.
     let mut config = match config::read(cfg.clone()) {

@@ -1,0 +1,149 @@
+#
+# Webdav server settings.
+#
+[server]
+  # HTTP Port(s) to listen on.
+  # (https not implemented yet - use a frontend proxy like nginx)
+  listen = [ "0.0.0.0:4918", "[::]:4918" ]
+  # Unix uid/gid to run under (when not running setuid as user).
+  # Optional - if not set, will not change uid.
+  # uid = 33
+  # gid = 33
+  # Server: header to send (default: "webdav-server-rs")
+  identification = "webdav-server-rs"
+
+#
+# User settings.
+#
+# These are defaults. The same settings can be applied
+# on the [[location]] level.
+#
+[accounts]
+  # how to authenticate: pam, htaccess.NAME (default: unset).
+  # auth-type = "pam"
+  # what account "database" to use (default: unset).
+  # acct-type = "unix"
+  # realm to use with basic authentication (default: "Webdav Server").
+  realm = "Webdav Server"
+
+#
+# PAM authentication settings.
+#
+[pam]
+  # PAM service to use.
+  service = "other"
+  # Cache timeout (secs). 0 disables the cache (default: 120).
+  cache-timeout = 120
+  # Number of thread to use for the PAM service threadpool (default: 8).
+  threads = 8
+
+#
+# Htpasswd authentication settings.
+#
+[htpasswd.example]
+  # htpasswd file.
+  htpasswd = "/etc/htpasswd.example"
+
+# Unix account settings.
+#
+[unix]
+  # Cache timeout (secs). 0 disables the cache (default: 120).
+  cache-timeout = 120
+  # Accounts with a user-id lower than this value cannot login (default: 0).
+  min-uid = 1000
+
+#
+# Below follow a number of locations. Each location definition starts with
+# [[location]] (literally). For every request, the "path" and "methods"
+# settings of each location are checked in the same order # as they appear
+# in this file. The first one that matches is used.
+#
+
+##
+## Example location. Lists all settings.
+##
+[[location]]
+  # Matching route(s) to the resource.
+  #
+  # As is the convention with many http routers, you can use :PARAMETER
+  # (path element match) or *PARAMETER (path wildcard match) in the
+  # path definition. Everything between parentheses is optional.
+  #
+  # Currently 2 parameters can be used:
+  #
+  # - "path" is the part of the path to map to the filesystem
+  # - "user" matches the currently authenticated user.
+  #
+  # A couple of examples:
+  #
+  # - For authenticated webdav sessions: [ "/:user/*path" ] or [ "/:user(/*path)" ]
+  # - For serving / but no dirs below it: [ "/(:path)" ]
+  # - For serving / and everything below it: [ "/*path" ]
+  #
+  # Note that only "path" is what is applied to the "directory" setting to
+  # form a path on the filesystem. So route = [ "/loca/tion/*path" ] and
+  # directory = "/var/www/html" will serve the content of /var/www/html
+  # at the http path /loca/tion/.
+  #
+  # If there is no route defined, the location is ignored.
+  route = [ "/*path" ]
+
+  # Allowed methods (default: all).
+  #
+  # List of individual methods, or one of:
+  #
+  # http-ro: GET, HEAD
+  # http-rw: GET, HEAD, PUT
+  # webdav-ro: GET, HEAD, OPTIONS, PROPFIND
+  # webdav-rw: GET, HEAD, OPTIONS, PROPFIND, PUT, PATCH, PROPPATCH,
+  #            MKCOL, COPY, MOVE, DELETE, LOCK, UNLOCK
+  methods = [ "webdav-ro" ]
+
+  # Authenticate? true, false, opportunistic, write (default: opportunistic).
+  #
+  # "opportunistic": means "if you send an Authorization: header, we'll check it".
+  # "write": means "for methods in webdav-rw that are not in webdav-ro".
+  auth = "false"
+
+  # Type of handler: filesystem, virtroot. Mandatory.
+  #
+  # The filesystem handler is what you would expect.
+  #
+  # The virtroot handler is a special handler for PROPFIND requests on
+  # authenticated sessions, i.e. where we have a username. It is useful
+  # when you have your webdav clients all under, say, /:user/*path.
+  # In that case, normally a PROPFIND of "/" would return either NOT_FOUND
+  # or the contents of the directory of some [[location]]. If the handler
+  # is set to "virtroot", a PROPFIND will list exactly one subdirectory,
+  # with the name of the authenticated user.
+  #
+  handler = "filesystem"
+
+  # what to do on 404 Not Found: continue, return (default: return).
+  on_notfound = "return"
+
+  # Change UID/GID to that of the authenticated user: true, false (default: false).
+  setuid = false
+
+  # Directory to serve. Mandatory.
+  #
+  # You can use "~" to indicate "homedirectory of authenticated user".
+  #
+  directory = "C:\\"
+
+  # Index file to serve when you GET a directory (if it exists) (default: none).
+  #indexfile = "index.html"
+
+  # Serve HTML directory indexes: true, false (default: false).
+  autoindex = false
+
+  # webdav PROPFIND: hide symbolic links: true, false (default: true).
+  hide-symlinks = true
+
+  # case insensitive lookups: true, false, ms (default: false).
+  # "ms" means "for Microsoft clients".
+  case-insensitive = "false"
+
+# Another location definition could follow.
+#[[location]]
+
