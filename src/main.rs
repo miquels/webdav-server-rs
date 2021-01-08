@@ -400,7 +400,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let port = matches.value_of("PORT");
     #[cfg(not(target_os = "windows"))]
-    let cfg = matches.value_of("CFG").unwrap_or(".\\webdav-server.toml");
+    let cfg = matches.value_of("CFG").unwrap_or("/etc/webdav-server.toml");
+    //let cfg = matches.value_of("CFG").unwrap_or(".\\webdav-server.toml");
     #[cfg(target_os = "windows")]
     let cfg = matches.value_of("CFG").unwrap_or(".\\webdav-windows.toml");
 

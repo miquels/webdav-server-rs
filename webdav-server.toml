@@ -7,8 +7,8 @@
   listen = [ "0.0.0.0:4918", "[::]:4918" ]
   # Unix uid/gid to run under (when not running setuid as user).
   # Optional - if not set, will not change uid.
-  # uid = 33
-  # gid = 33
+  uid = 33
+  gid = 33
   # Server: header to send (default: "webdav-server-rs")
   identification = "webdav-server-rs"
 
@@ -129,7 +129,7 @@
   #
   # You can use "~" to indicate "homedirectory of authenticated user".
   #
-  directory = "/Users/sjpark/webdav-server-rs"
+  directory = "/var/www/html"
 
   # Index file to serve when you GET a directory (if it exists) (default: none).
   #indexfile = "index.html"
