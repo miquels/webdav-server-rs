@@ -96,13 +96,24 @@ impl User {
         if with_groups {
             let mut ngroups = (buf.len() / std::mem::size_of::<libc::gid_t>()) as libc::c_int;
             let ret = unsafe {
-                libc::getgrouplist(
-                    cname.as_ptr(),
-                    user.gid as libc::gid_t,
-                    //user.gid as i32,
-                    buf.as_mut_ptr() as *mut _,
-                    &mut ngroups as *mut _,
-                )
+                #[cfg(any(target_os = "macos", target_os = "ios"))] 
+                {
+                    libc::getgrouplist(
+                        cname.as_ptr(),
+                        user.gid as libc::c_int,
+                        buf.as_mut_ptr() as *mut _,
+                        &mut ngroups as *mut _,
+                    )
+                }
+                #[cfg(not(any(target_os = "macos", target_os = "ios")))] 
+                {
+                    libc::getgrouplist(
+                        cname.as_ptr(),
+                        user.gid as libc::gid_t,
+                        buf.as_mut_ptr() as *mut _,
+                        &mut ngroups as *mut _,
+                    )
+                }
             };
             if ret >= 0 && ngroups > 0 {
                 let mut groups_vec = Vec::with_capacity(ngroups as usize);

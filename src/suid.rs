@@ -266,7 +266,7 @@ pub fn proc_switch_ugid(uid: u32, gid: u32, keep_privs: bool) {
         }
 
         // set real uid, and keep effective uid at 0.
-        #[cfg(not(any(target_os = "openbsd", target_os = "freebsd")))]
+        #[cfg(not(any(target_os = "openbsd", target_os = "freebsd", target_os = "macos")))]
         if libc::setreuid(uid, 0) != 0 {
             panic!("libc::setreuid({}, 0): {:?}", uid, last_os_error());
         }
