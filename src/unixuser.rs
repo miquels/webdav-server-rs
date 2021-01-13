@@ -22,24 +22,20 @@ pub struct User {
     pub shell:  PathBuf,
 }
 
-#[cfg(not(target_os = "windows"))]
 unsafe fn cptr_to_osstr<'a>(c: *const libc::c_char) -> &'a OsStr {
     let bytes = CStr::from_ptr(c).to_bytes();
-    OsStr::from_bytes(&bytes)
-}
-#[cfg(target_os = "windows")]
-unsafe fn cptr_to_osstr(c: *const libc::c_char) -> OsString {
-    let bytes = CStr::from_ptr(c).to_bytes();
-    OsString::from(String::from_utf8(bytes.to_vec()).unwrap())
+    #[cfg(not(target_os = "windows"))]
+    {
+        OsStr::from_bytes(&bytes)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::str::from_utf8(&bytes).unwrap().as_ref()
+    }
 }
 
-#[cfg(not(target_os = "windows"))]
 unsafe fn cptr_to_path<'a>(c: *const libc::c_char) -> &'a Path {
     Path::new(cptr_to_osstr(c))
-}
-#[cfg(target_os = "windows")]
-unsafe fn cptr_to_path(c: *const libc::c_char) -> PathBuf {
-    PathBuf::from(cptr_to_osstr(c))
 }
 
 #[cfg(not(target_os = "windows"))]
