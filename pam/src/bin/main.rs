@@ -18,9 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut pamauth = PamAuth::new(None)?;
 
-    let mut rt = tokio::runtime::Builder::new()
+    let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
-        .basic_scheduler()
         .build()?;
 
     rt.block_on(async move {

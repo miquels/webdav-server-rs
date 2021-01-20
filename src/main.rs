@@ -438,10 +438,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth = auth::Auth::new(config.clone())?;
 
     // start tokio runtime and initialize the rest from within the runtime.
-    let mut rt = tokio::runtime::Builder::new()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
-        .threaded_scheduler()
         .build()?;
 
     rt.block_on(async move {
