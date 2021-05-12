@@ -19,7 +19,7 @@
 # on the [[location]] level.
 #
 [accounts]
-  # how to authenticate: pam, htaccess.NAME (default: unset).
+  # how to authenticate: pam, htpasswd.NAME (default: unset).
   auth-type = "pam"
   # what account "database" to use (default: unset).
   acct-type = "unix"
@@ -40,7 +40,7 @@
 #
 # Htpasswd authentication settings.
 #
-[htpasswd.example]
+[htpasswd.NAME]
   # htpasswd file.
   htpasswd = "/etc/htpasswd.example"
 
