@@ -5,7 +5,7 @@ name = "webdav-server"
 # - Update html_root_url in src/main.rs
 # - Update CHANGELOG.md.
 # - Create git tag webdav-server-0.x.y
-version = "0.3.0"
+version = "0.4.0"
 
 description = "webdav/http server with support for user accounts"
 readme = "README.md"
