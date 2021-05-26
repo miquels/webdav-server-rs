@@ -1,3 +1,9 @@
+webdav-server-rs (0.4) unreleased; urgency=low
+
+  * update to 0.4 release.
+
+ -- Miquel van Smoorenburg (XS4ALL) <mikevs@xs4all.net>  Wed, 12 May 2021 16:49:34 +0200
+
 webdav-server-rs (0.3) unreleased; urgency=low
 
   * update to webdav-handler-rs 0.2.0-alpha.1

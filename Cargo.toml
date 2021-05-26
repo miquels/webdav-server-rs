@@ -5,7 +5,7 @@ name = "webdav-server"
 # - Update html_root_url in src/main.rs
 # - Update CHANGELOG.md.
 # - Create git tag webdav-server-0.x.y
-version = "0.3.0"
+version = "0.4.0"
 
 description = "webdav/http server with support for user accounts"
 readme = "README.md"
@@ -49,29 +49,28 @@ opt-level = 0
 clap = "2.33.3"
 enum_from_str = "0.1.0"
 enum_from_str_derive = "0.1.0"
-env_logger = "0.8.2"
-# fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
-futures = "0.3.12"
-handlebars = "3.5.2"
-headers = "0.3.3"
-http = "0.2.3"
-hyper = { version = "0.14.2", features = [ "http1", "http2", "server", "stream", "runtime" ] }
+env_logger = "0.8.3"
+fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
+futures = "0.3.15"
+handlebars = "3.5.5"
+headers = "0.3.4"
+http = "0.2.4"
+hyper = { version = "0.14.7", features = [ "http1", "http2", "server", "stream", "runtime" ] }
 lazy_static = "1.4.0"
-libc = "0.2.82"
-log = "0.4.13"
+libc = "0.2.94"
+log = "0.4.14"
 net2 = "0.2.37"
-# pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
+pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
 percent-encoding = "2.1.0"
-regex = "1.4.3"
-serde = { version = "1.0.120", features = ["derive"] }
-serde_json = "1.0.61"
+regex = "1.5.4"
+serde = { version = "1.0.125", features = ["derive"] }
+serde_json = "1.0.64"
 time = "0.1.42"
-tokio = { version = "1.0.2", features = ["full"] }
+tokio = { version = "1.5.0", features = ["full"] }
 toml = "0.5.8"
-url = "2.2.0"
-#webdav-handler = { path = "../webdav-handler-rs", version = "=0.2.0-alpha.5" }
-#webdav-handler = { path = "webdav-handler-rs", version = "=0.2.0-alpha.5" }
-webdav-handler = "=0.2.0-alpha.6"
+url = "2.2.2"
+#webdav-handler = { path = "../webdav-handler-rs", version = "=0.2.0" }
+webdav-handler = "0.2.0"
 pwhash = "1.0.0"
 
 [target.'cfg(unix)'.dependencies]
