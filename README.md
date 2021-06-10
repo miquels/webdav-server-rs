@@ -7,7 +7,7 @@ support for thread-local credentials.
 
 Uses PAM authentication and local unix accounts.
 
-This server does not implement TLS or logging. For now, it is assumed that
+This server does not implement logging. For now, it is assumed that
 most users of this software want to put an NGNIX or Apache reverse-proxy
 in front of it anyway, and that frontend can implement TLS, logging,
 enforcing a maximum number of connections, and timeouts.

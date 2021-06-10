@@ -32,6 +32,12 @@ pub struct Config {
 #[derive(Deserialize, Debug, Clone)]
 pub struct Server {
     pub listen:         OneOrManyAddr,
+    #[serde(default)]
+    pub tls:            bool,
+    #[serde(default)]
+    pub tls_key:        Option<String>,
+    #[serde(default)]
+    pub tls_cert:       Option<String>,
     //#[serde(deserialize_with = "deserialize_user", default)]
     pub uid:            Option<u32>,
     //#[serde(deserialize_with = "deserialize_group", default)]

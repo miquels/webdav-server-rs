@@ -2,9 +2,14 @@
 # Webdav server settings.
 #
 [server]
-  # HTTP Port(s) to listen on.
-  # (https not implemented yet - use a frontend proxy like nginx)
+  # Port(s) to listen on.
   listen = [ "0.0.0.0:4918", "[::]:4918" ]
+
+  # Tls config.
+  # tls = true
+  # tls_cert = "/etc/ssl/certs/example.com-chained.crt"
+  # tls_key = "/etc/ssl/private/example.com.key"
+
   # Unix uid/gid to run under (when not running setuid as user).
   # Optional - if not set, will not change uid.
   uid = 33

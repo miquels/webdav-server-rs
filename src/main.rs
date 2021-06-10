@@ -21,6 +21,7 @@ mod rootfs;
 #[doc(hidden)]
 pub mod router;
 mod suid;
+mod tls;
 mod unixuser;
 mod userfs;
 
@@ -35,10 +36,11 @@ use headers::{authorization::Basic, Authorization, HeaderMapExt};
 use http::status::StatusCode;
 use hyper::{
     self,
-    server::conn::AddrStream,
+    server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
 };
-
+use tls_listener::TlsListener;
+use tokio_rustls::server::TlsStream;
 use webdav_handler::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
 use webdav_handler::{fakels::FakeLs, fs::DavFileSystem, ls::DavLockSystem};
 
@@ -46,6 +48,7 @@ use crate::config::{AcctType, Auth, CaseInsensitive, Handler, Location, OnNotfou
 use crate::rootfs::RootFs;
 use crate::router::MatchedRoute;
 use crate::suid::proc_switch_ugid;
+use crate::tls::tls_config;
 use crate::userfs::UserFs;
 
 static PROGNAME: &'static str = "webdav-server";
@@ -447,8 +450,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // build servers (one for each listen address).
         let dav_server = Server::new(config.clone(), auth);
         let mut servers = Vec::new();
+        let mut tls_servers = Vec::new();
         for sockaddr in addrs {
-            let listener = match make_listener(&sockaddr) {
+            let listener = match make_listener(sockaddr) {
                 Ok(l) => l,
                 Err(e) => {
                     eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
@@ -456,27 +460,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             };
             let dav_server = dav_server.clone();
-            let make_service = make_service_fn(move |socket: &AddrStream| {
-                let dav_server = dav_server.clone();
-                let remote_addr = socket.remote_addr();
-                async move {
-                    let func = move |req| {
-                        let dav_server = dav_server.clone();
-                        async move { dav_server.route(req, remote_addr).await }
-                    };
-                    Ok::<_, hyper::Error>(service_fn(func))
-                }
-            });
+            let incoming = AddrIncoming::from_listener(listener)?;
 
-            let server = hyper::Server::from_tcp(listener)?.tcp_nodelay(true);
-            println!("Listening on http://{:?}", sockaddr);
+            if config.server.tls  {
+                let make_service = make_service_fn(move |stream: &TlsStream<AddrStream>| {
+                    let dav_server = dav_server.clone();
+                    let remote_addr = stream.get_ref().0.remote_addr();
+                    async move {
+                        let func = move |req| {
+                            let dav_server = dav_server.clone();
+                            async move { dav_server.route(req, remote_addr).await }
+                        };
+                        Ok::<_, hyper::Error>(service_fn(func))
+                    }
+                });
+                let incoming = TlsListener::new(tls_config(&config.server)?, incoming);
+                let server = hyper::Server::builder(incoming);
+                println!("Listening on http://{:?}", sockaddr);
+                tls_servers.push(async move {
+                    if let Err(e) = server.serve(make_service).await {
+                        eprintln!("{}: server error: {}", PROGNAME, e);
+                        exit(1);
+                    }
+                });
+            } else {
+                let make_service = make_service_fn(move |socket: &AddrStream| {
+                    let dav_server = dav_server.clone();
+                    let remote_addr = socket.remote_addr();
+                    async move {
+                        let func = move |req| {
+                            let dav_server = dav_server.clone();
+                            async move { dav_server.route(req, remote_addr).await }
+                        };
+                        Ok::<_, hyper::Error>(service_fn(func))
+                    }
+                });
+                let server = hyper::Server::builder(incoming);
+                println!("Listening on http://{:?}", sockaddr);
 
-            servers.push(async move {
-                if let Err(e) = server.serve(make_service).await {
-                    eprintln!("{}: server error: {}", PROGNAME, e);
-                    exit(1);
-                }
-            });
+                servers.push(async move {
+                    if let Err(e) = server.serve(make_service).await {
+                        eprintln!("{}: server error: {}", PROGNAME, e);
+                        exit(1);
+                    }
+                });
+            }
         }
 
         // drop privs.
@@ -498,6 +526,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // spawn all servers, and wait for them to finish.
         let mut tasks = Vec::new();
         for server in servers.drain(..) {
+            tasks.push(tokio::spawn(server));
+        }
+        for server in tls_servers.drain(..) {
             tasks.push(tokio::spawn(server));
         }
         for task in tasks.drain(..) {
@@ -544,15 +575,18 @@ fn expand_directory(dir: &str, pwd: Option<&Arc<unixuser::User>>) -> Result<Stri
 
 // Make a new TcpListener, and if it's a V6 listener, set the
 // V6_V6ONLY socket option on it.
-fn make_listener(addr: &SocketAddr) -> io::Result<std::net::TcpListener> {
-    let s = if addr.is_ipv6() {
-        let s = net2::TcpBuilder::new_v6()?;
-        s.only_v6(true)?;
-        s
-    } else {
-        net2::TcpBuilder::new_v4()?
-    };
-    s.reuse_address(true)?;
-    s.bind(addr)?;
-    s.listen(128)
+fn make_listener(addr: SocketAddr) -> io::Result<tokio::net::TcpListener> {
+    use socket2::{Domain, SockAddr, Socket, Type, Protocol};
+    let s = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    if addr.is_ipv6() {
+        s.set_only_v6(true)?;
+    }
+    s.set_nonblocking(true)?;
+    s.set_nodelay(true)?;
+    s.set_reuse_address(true)?;
+    let addr: SockAddr = addr.into();
+    s.bind(&addr)?;
+    s.listen(128)?;
+    let listener: std::net::TcpListener = s.into();
+    tokio::net::TcpListener::from_std(listener)
 }
