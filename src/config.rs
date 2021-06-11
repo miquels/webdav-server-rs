@@ -31,9 +31,10 @@ pub struct Config {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Server {
+    #[serde(default)]
     pub listen:         OneOrManyAddr,
     #[serde(default)]
-    pub tls:            bool,
+    pub tls_listen:     OneOrManyAddr,
     #[serde(default)]
     pub tls_key:        Option<String>,
     #[serde(default)]
@@ -168,6 +169,21 @@ pub enum OneOrManyAddr {
     Many(Vec<SocketAddr>),
 }
 
+impl OneOrManyAddr {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            OneOrManyAddr::One(_) => false,
+            OneOrManyAddr::Many(v) => v.is_empty(),
+        }
+    }
+}
+
+impl Default for OneOrManyAddr {
+    fn default() -> Self {
+        OneOrManyAddr::Many(Vec::new())
+    }
+}
+
 impl ToSocketAddrs for OneOrManyAddr {
     type Iter = std::vec::IntoIter<SocketAddr>;
     fn to_socket_addrs(&self) -> io::Result<std::vec::IntoIter<SocketAddr>> {
@@ -280,6 +296,21 @@ pub fn check(cfg: &str, config: &Config) {
     if let Some(AuthType::Pam) = config.accounts.auth_type {
         if config.pam.service == "" {
             eprintln!("{}: missing section [pam]", cfg);
+            exit(1);
+        }
+    }
+
+    if config.server.listen.is_empty() && config.server.tls_listen.is_empty() {
+        eprintln!("{}: [server]: at least one of listen or tls_listen must be set", cfg);
+        exit(1);
+    }
+    if !config.server.tls_listen.is_empty() {
+        if config.server.tls_cert.is_none() {
+            eprintln!("{}: [server]: tls_cert not set", cfg);
+            exit(1);
+        }
+        if config.server.tls_key.is_none() {
+            eprintln!("{}: [server]: tls_key not set", cfg);
             exit(1);
         }
     }

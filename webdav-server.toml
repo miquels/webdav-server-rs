@@ -6,7 +6,7 @@
   listen = [ "0.0.0.0:4918", "[::]:4918" ]
 
   # Tls config.
-  # tls = true
+  # tls_listen = [ "0.0.0.0:443", "[::]:443" ]
   # tls_cert = "/etc/ssl/certs/example.com-chained.crt"
   # tls_key = "/etc/ssl/private/example.com.key"
 
