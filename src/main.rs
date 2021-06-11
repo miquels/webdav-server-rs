@@ -28,6 +28,7 @@ mod userfs;
 use std::convert::TryFrom;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::os::unix::io::{FromRawFd, AsRawFd};
 use std::process::exit;
 use std::sync::Arc;
 
@@ -460,9 +461,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             };
             let dav_server = dav_server.clone();
-            let incoming = AddrIncoming::from_listener(listener)?;
 
             if config.server.tls  {
+                let tls_config = tls_config(&config.server)?;
                 let make_service = make_service_fn(move |stream: &TlsStream<AddrStream>| {
                     let dav_server = dav_server.clone();
                     let remote_addr = stream.get_ref().0.remote_addr();
@@ -474,13 +475,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok::<_, hyper::Error>(service_fn(func))
                     }
                 });
-                let incoming = TlsListener::new(tls_config(&config.server)?, incoming);
-                let server = hyper::Server::builder(incoming);
+
+                // Since the server can exit when there's an error on the TlsStream,
+                // we run it in a loop. Every time the loop is entered we dup() the
+                // listening fd and create a new TcpListener. This way, we should
+                // not lose any pending connections during a restart.
+                let master_listen_fd = listener.as_raw_fd();
+                std::mem::forget(listener);
+
                 println!("Listening on http://{:?}", sockaddr);
                 tls_servers.push(async move {
-                    if let Err(e) = server.serve(make_service).await {
-                        eprintln!("{}: server error: {}", PROGNAME, e);
-                        exit(1);
+                    loop {
+                        // reuse the incoming socket after the server exits.
+                        let listen_fd = match nix::unistd::dup(master_listen_fd) {
+                            Ok(fd) => fd,
+                            Err(e) => {
+                                eprintln!("{}: server error: dup: {}", PROGNAME, e);
+                                break;
+                            }
+                        };
+                        // SAFETY: listen_fd is unique (we just dup'ed it).
+                        let std_listen = unsafe { std::net::TcpListener::from_raw_fd(listen_fd) };
+                        let listener = match tokio::net::TcpListener::from_std(std_listen) {
+                            Ok(l) => l,
+                            Err(e) => {
+                                eprintln!("{}: server error: new TcpListener: {}", PROGNAME, e);
+                                break;
+                            }
+                        };
+                        let a_incoming = match AddrIncoming::from_listener(listener) {
+                            Ok(a) => a,
+                            Err(e) => {
+                                eprintln!("{}: server error: new AddrIncoming: {}", PROGNAME, e);
+                                break;
+                            }
+                        };
+                        let incoming = TlsListener::new(tls_config.clone(), a_incoming);
+                        let server = hyper::Server::builder(incoming);
+                        if let Err(e) = server.serve(make_service.clone()).await {
+                            eprintln!("{}: server error: {} (retrying)", PROGNAME, e);
+                        }
                     }
                 });
             } else {
@@ -495,6 +529,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok::<_, hyper::Error>(service_fn(func))
                     }
                 });
+                let incoming = AddrIncoming::from_listener(listener)?;
                 let server = hyper::Server::builder(incoming);
                 println!("Listening on http://{:?}", sockaddr);
 
