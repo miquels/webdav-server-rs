@@ -95,7 +95,7 @@ pub struct Location {
     #[serde(default)]
     pub setuid:           bool,
     pub directory:        String,
-    #[serde(default)]
+    #[serde(rename = "hide-symlinks", default)]
     pub hide_symlinks:    Option<bool>,
     #[serde(default)]
     pub indexfile:        Option<String>,
