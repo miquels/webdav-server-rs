@@ -28,6 +28,7 @@ mod userfs;
 use std::convert::TryFrom;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
+#[cfg(feature = "tls")]
 use std::os::unix::io::{FromRawFd, AsRawFd};
 use std::process::exit;
 use std::sync::Arc;
@@ -40,7 +41,9 @@ use hyper::{
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
 };
+#[cfg(feature = "tls")]
 use tls_listener::TlsListener;
+#[cfg(feature = "tls")]
 use tokio_rustls::server::TlsStream;
 use webdav_handler::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
 use webdav_handler::{fakels::FakeLs, fs::DavFileSystem, ls::DavLockSystem};
@@ -49,6 +52,7 @@ use crate::config::{AcctType, Auth, CaseInsensitive, Handler, Location, OnNotfou
 use crate::rootfs::RootFs;
 use crate::router::MatchedRoute;
 use crate::suid::proc_switch_ugid;
+#[cfg(feature = "tls")]
 use crate::tls::tls_config;
 use crate::userfs::UserFs;
 
@@ -462,6 +466,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // build servers (one for each listen address).
         let dav_server = Server::new(config.clone(), auth);
         let mut servers = Vec::new();
+        #[cfg(feature="tls")]
         let mut tls_servers = Vec::new();
 
         // Plaintext servers.
@@ -497,6 +502,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
 
+        #[cfg(feature="tls")]
         // TLS servers.
         for sockaddr in tls_addrs {
             let listener = make_listener(sockaddr).unwrap_or_else(|e| {
@@ -581,6 +587,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for server in servers.drain(..) {
             tasks.push(tokio::spawn(server));
         }
+        #[cfg(feature="tls")]
         for server in tls_servers.drain(..) {
             tasks.push(tokio::spawn(server));
         }

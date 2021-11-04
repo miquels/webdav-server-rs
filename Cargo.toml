@@ -50,7 +50,7 @@ clap = "2.33.3"
 enum_from_str = "0.1.0"
 enum_from_str_derive = "0.1.0"
 env_logger = "0.8.3"
-fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
+#fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
 futures = "0.3.15"
 handlebars = "3.5.5"
 headers = "0.3.4"
@@ -60,23 +60,25 @@ lazy_static = "1.4.0"
 libc = "0.2.94"
 log = "0.4.14"
 nix = "0.21.0"
-pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
+#pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
 percent-encoding = "2.1.0"
 regex = "1.5.4"
 serde = { version = "1.0.125", features = ["derive"] }
 serde_json = "1.0.64"
 socket2 = "0.4.0"
 time = "0.1.42"
-tls-listener = { version = "0.2.1", features = [ "hyper-h1", "hyper-h2" ] }
+#tls-listener = { version = "0.2.1", features = [ "hyper-h1", "hyper-h2" ] }
 tokio = { version = "1.5.0", features = ["full"] }
-tokio-rustls = "0.22.0"
+#tokio-rustls = "0.22.0"
 toml = "0.5.8"
 url = "2.2.2"
-#webdav-handler = { path = "../webdav-handler-rs", version = "=0.2.0" }
-webdav-handler = "0.2.0"
+webdav-handler = { path = "webdav-handler-rs", version = "=0.2.0" }
+#webdav-handler = "0.2.0"
 pwhash = "1.0.0"
 
 [target.'cfg(unix)'.dependencies]
 fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
 pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
+tls-listener = { version = "0.2.1", features = [ "hyper-h1", "hyper-h2" ] }
+tokio-rustls = "0.22.0"
 

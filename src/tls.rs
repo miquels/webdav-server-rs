@@ -1,11 +1,14 @@
 use std::fs::File;
 use std::io;
 
+#[cfg(feature = "tls")]
 use tokio_rustls::rustls::internal::pemfile;
+#[cfg(feature = "tls")]
 use tokio_rustls::rustls::{NoClientAuth, ServerConfig};
 
 use crate::config::Server;
 
+#[cfg(feature = "tls")]
 pub fn tls_config(cfg: &Server) -> io::Result<ServerConfig> {
     let pkey_fn = cfg.tls_key.as_ref().ok_or_else(|| {
         io::Error::new(io::ErrorKind::NotFound, "config: server: tls_key not set")
