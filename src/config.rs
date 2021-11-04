@@ -31,7 +31,14 @@ pub struct Config {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Server {
+    #[serde(default)]
     pub listen:         OneOrManyAddr,
+    #[serde(default)]
+    pub tls_listen:     OneOrManyAddr,
+    #[serde(default)]
+    pub tls_key:        Option<String>,
+    #[serde(default)]
+    pub tls_cert:       Option<String>,
     //#[serde(deserialize_with = "deserialize_user", default)]
     pub uid:            Option<u32>,
     //#[serde(deserialize_with = "deserialize_group", default)]
@@ -88,7 +95,7 @@ pub struct Location {
     #[serde(default)]
     pub setuid:           bool,
     pub directory:        String,
-    #[serde(default)]
+    #[serde(default, alias = "hide-symlinks")]
     pub hide_symlinks:    Option<bool>,
     #[serde(default)]
     pub indexfile:        Option<String>,
@@ -160,6 +167,21 @@ pub enum OnNotfound {
 pub enum OneOrManyAddr {
     One(SocketAddr),
     Many(Vec<SocketAddr>),
+}
+
+impl OneOrManyAddr {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            OneOrManyAddr::One(_) => false,
+            OneOrManyAddr::Many(v) => v.is_empty(),
+        }
+    }
+}
+
+impl Default for OneOrManyAddr {
+    fn default() -> Self {
+        OneOrManyAddr::Many(Vec::new())
+    }
 }
 
 impl ToSocketAddrs for OneOrManyAddr {
@@ -274,6 +296,21 @@ pub fn check(cfg: &str, config: &Config) {
     if let Some(AuthType::Pam) = config.accounts.auth_type {
         if config.pam.service == "" {
             eprintln!("{}: missing section [pam]", cfg);
+            exit(1);
+        }
+    }
+
+    if config.server.listen.is_empty() && config.server.tls_listen.is_empty() {
+        eprintln!("{}: [server]: at least one of listen or tls_listen must be set", cfg);
+        exit(1);
+    }
+    if !config.server.tls_listen.is_empty() {
+        if config.server.tls_cert.is_none() {
+            eprintln!("{}: [server]: tls_cert not set", cfg);
+            exit(1);
+        }
+        if config.server.tls_key.is_none() {
+            eprintln!("{}: [server]: tls_key not set", cfg);
             exit(1);
         }
     }
