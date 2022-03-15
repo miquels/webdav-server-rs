@@ -52,6 +52,9 @@ If the client IP adress is localhost (127/8 or ::1) then the content of
 the X-Forwarded-For header is used instead (if present) to allow for
 aforementioned frontend proxies.
 
+## Docker Usage
+Docker image can be built using `docker build -t webdav-server .`, in order to configure it attach a volume to `/data/` and edit the `webdav-server.toml` in there. It's recommended to change the `location.directory` and `htpasswd` (if set) to that directory as well to ensure persistent data.
+
 ## Copyright and License.
 
  * © 2018, 2019 XS4ALL Internet bv
