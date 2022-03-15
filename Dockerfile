@@ -5,11 +5,8 @@ RUN rustup target add x86_64-unknown-linux-musl
 
 RUN USER=root cargo new webdav-server
 WORKDIR /usr/src/webdav-server
-COPY Cargo.toml Cargo.lock ./
+COPY ./ ./
 RUN cargo build --release
-
-
-COPY . .
 RUN cargo install --target x86_64-unknown-linux-musl --path .
 
 # Clean image for execution
