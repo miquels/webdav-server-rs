@@ -120,24 +120,15 @@ impl Server {
         Ok(Some(pwd))
     }
 
-    // return a new response::Builder with the Server: header set.
+    // return a new response::Builder with the Server and CORS header set.
     fn response_builder(&self) -> http::response::Builder {
         let mut builder = hyper::Response::builder();
-        let id = self
-            .config
-            .server
-            .identification
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or("webdav-server-rs");
-        if id != "" {
-            builder = builder.header("Server", id);
-        }
+        self.set_headers(builder.headers_mut().unwrap());
         builder
     }
 
-    // Set Server: webdav-server-rs header.
-    fn set_server_header(&self, headers: &mut http::HeaderMap<http::header::HeaderValue>) {
+    // Set Server: webdav-server-rs header, and CORS.
+    fn set_headers(&self, headers: &mut http::HeaderMap<http::header::HeaderValue>) {
         let id = self
             .config
             .server
@@ -147,6 +138,11 @@ impl Server {
             .unwrap_or("webdav-server-rs");
         if id != "" {
             headers.insert("server", id.parse().unwrap());
+        }
+        if self.config.server.cors {
+            headers.insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+            headers.insert("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS,PROPFIND".parse().unwrap());
+            headers.insert("Access-Control-Allow-Headers", "DNT,Depth,Range".parse().unwrap());
         }
     }
 
@@ -373,7 +369,7 @@ impl Server {
     async fn run_davhandler(&self, config: DavConfig, req: HttpRequest) -> HttpResult {
         let resp = self.dh.handle_with(config, req).await;
         let (mut parts, body) = resp.into_parts();
-        self.set_server_header(&mut parts.headers);
+        self.set_headers(&mut parts.headers);
         Ok(http::Response::from_parts(parts, body))
     }
 }

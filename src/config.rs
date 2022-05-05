@@ -45,6 +45,8 @@ pub struct Server {
     pub gid:            Option<u32>,
     #[serde(default)]
     pub identification: Option<String>,
+    #[serde(default)]
+    pub cors:             bool,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
