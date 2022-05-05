@@ -127,8 +127,8 @@ impl FsQuota {
             return Err(FqError::IoError(io::Error::last_os_error()));
         }
         Ok(FsQuota {
-            bytes_used:  ((vfs.f_blocks - vfs.f_bfree) * vfs.f_bsize) as u64,
-            bytes_limit: Some(((vfs.f_blocks - (vfs.f_bfree - vfs.f_bavail)) * vfs.f_bsize) as u64),
+            bytes_used:  ((vfs.f_blocks - vfs.f_bfree) * vfs.f_frsize) as u64,
+            bytes_limit: Some(((vfs.f_blocks - (vfs.f_bfree - vfs.f_bavail)) * vfs.f_frsize) as u64),
             files_used:  (vfs.f_files - vfs.f_ffree) as u64,
             files_limit: Some((vfs.f_files - (vfs.f_ffree - vfs.f_favail)) as u64),
         })
