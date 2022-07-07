@@ -35,6 +35,39 @@ impl Auth {
         })
     }
 
+
+    // Get creds from Authorization header.
+    pub fn get_authorization<'a>(
+        &'a self,
+        req: &'a HttpRequest,
+    ) -> Result<(String, String), StatusCode> {
+        // we must have a login/pass
+        let basic = match req.headers().typed_get::<Authorization<Basic>>() {
+            Some(Authorization(basic)) => basic,
+            _ => return Err(StatusCode::UNAUTHORIZED),
+        };
+        let user = basic.username();
+        let pass = basic.password();
+
+        Ok((user.to_owned(), pass.to_owned()))
+    }
+
+    // Get user from X-Authorization header
+    // The header is trusted.
+    pub fn get_x_authorization<'a>(
+        &'a self,
+        req: &'a HttpRequest,
+    ) -> Result<String, StatusCode> {
+        // we must have a login/pass
+        let user = match req.headers().get("X-Authorization") {
+            Some(user) => user,
+            _ => return Err(StatusCode::UNAUTHORIZED),
+        };
+        let user = String::from_utf8_lossy(user.as_bytes()).to_string();
+
+        Ok(user)
+    }
+
     // authenticate user.
     pub async fn auth<'a>(
         &'a self,
@@ -43,13 +76,6 @@ impl Auth {
         _remote_ip: SocketAddr,
     ) -> Result<String, StatusCode>
     {
-        // we must have a login/pass
-        let basic = match req.headers().typed_get::<Authorization<Basic>>() {
-            Some(Authorization(basic)) => basic,
-            _ => return Err(StatusCode::UNAUTHORIZED),
-        };
-        let user = basic.username();
-        let pass = basic.password();
 
         // match the auth type.
         let auth_type = location
@@ -59,8 +85,33 @@ impl Auth {
             .or(self.config.accounts.auth_type.as_ref());
         match auth_type {
             #[cfg(feature = "pam")]
-            Some(&AuthType::Pam) => self.auth_pam(req, user, pass, _remote_ip).await,
-            Some(&AuthType::HtPasswd(ref ht)) => self.auth_htpasswd(user, pass, ht.as_str()).await,
+            Some(&AuthType::Pam) => {
+                let (user, pass) = match self.get_authorization(req) {
+                    Ok((user, pass)) => (user, pass),
+                    err => {
+                        return err;
+                    }
+                };
+                self.auth_pam(req, user, pass, _remote_ip).await
+            },
+            Some(&AuthType::HtPasswd(ref ht)) => {
+                let (user, pass) = match self.get_authorization(req)  {
+                    Ok((user, pass)) => (user, pass),
+                    Err(err) => {
+                        return Err(err);
+                    }
+                };
+                self.auth_htpasswd(&user, &pass, ht.as_str()).await
+            },
+            Some(&AuthType::XAuth) => {
+                let user = match self.get_x_authorization(req)  {
+                    Ok(user) => user,
+                    err => {
+                        return err;
+                    }
+                };
+                Ok(user)
+            }
             None => {
                 debug!("need authentication, but auth-type is not set");
                 Err(StatusCode::UNAUTHORIZED)
