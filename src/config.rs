@@ -133,7 +133,7 @@ pub enum Auth {
 
 #[derive(Debug, Clone)]
 pub enum AuthType {
-    #[cfg(feature = "pam")]
+    #[cfg(all(not(windows), feature = "pam"))]
     Pam,
     HtPasswd(String),
 }
@@ -229,7 +229,7 @@ where D: Deserializer<'de> {
     if s.starts_with("htpasswd.") {
         return Ok(Some(AuthType::HtPasswd(s[9..].to_string())));
     }
-    #[cfg(feature = "pam")]
+    #[cfg(all(not(windows), feature = "pam"))]
     if &s == "pam" {
         return Ok(Some(AuthType::Pam));
     }
@@ -292,7 +292,7 @@ pub fn build_routes(cfg: &str, config: &mut Config) -> io::Result<()> {
 }
 
 pub fn check(cfg: &str, config: &Config) {
-    #[cfg(feature = "pam")]
+    #[cfg(all(not(windows), feature = "pam"))]
     if let Some(AuthType::Pam) = config.accounts.auth_type {
         if config.pam.service == "" {
             eprintln!("{}: missing section [pam]", cfg);

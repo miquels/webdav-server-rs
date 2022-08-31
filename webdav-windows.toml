@@ -135,14 +135,14 @@
   #indexfile = "index.html"
 
   # Serve HTML directory indexes: true, false (default: false).
-  autoindex = false
+  autoindex = true
 
   # webdav PROPFIND: hide symbolic links: true, false (default: true).
   hide-symlinks = true
 
   # case insensitive lookups: true, false, ms (default: false).
   # "ms" means "for Microsoft clients".
-  case-insensitive = "false"
+  case-insensitive = "ms"
 
 # Another location definition could follow.
 #[[location]]

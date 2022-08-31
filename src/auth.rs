@@ -12,14 +12,14 @@ type HttpRequest = http::Request<hyper::Body>;
 #[derive(Clone)]
 pub struct Auth {
     config:   Arc<Config>,
-    #[cfg(feature = "pam")]
+    #[cfg(all(not(windows), feature = "pam"))]
     pam_auth: pam_sandboxed::PamAuth,
 }
 
 impl Auth {
     pub fn new(config: Arc<Config>) -> io::Result<Auth> {
         // initialize pam.
-        #[cfg(feature = "pam")]
+        #[cfg(all(not(windows), feature = "pam"))]
         let pam_auth = {
             // set cache timeouts.
             if let Some(timeout) = config.pam.cache_timeout {
@@ -29,7 +29,7 @@ impl Auth {
         };
 
         Ok(Auth {
-            #[cfg(feature = "pam")]
+            #[cfg(all(not(windows), feature = "pam"))]
             pam_auth,
             config,
         })
@@ -58,7 +58,7 @@ impl Auth {
             .as_ref()
             .or(self.config.accounts.auth_type.as_ref());
         match auth_type {
-            #[cfg(feature = "pam")]
+            #[cfg(all(not(windows), feature = "pam"))]
             Some(&AuthType::Pam) => self.auth_pam(req, user, pass, _remote_ip).await,
             Some(&AuthType::HtPasswd(ref ht)) => self.auth_htpasswd(user, pass, ht.as_str()).await,
             None => {
@@ -69,7 +69,7 @@ impl Auth {
     }
 
     // authenticate user using PAM.
-    #[cfg(feature = "pam")]
+    #[cfg(all(not(windows), feature = "pam"))]
     async fn auth_pam<'a>(
         &'a self,
         req: &'a HttpRequest,

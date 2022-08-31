@@ -27,11 +27,11 @@ categories = ["filesystem"]
 #
 #     cargo build --release --no-default-features --features=quota
 #
-# default = [ "pam", "quota" ]
+default = [ "pam", "quota" ]
 
 # dependencies for the feature.
-# pam = [ "pam-sandboxed" ]
-# quota = [ "fs-quota" ]
+pam = [ "pam-sandboxed" ]
+quota = [ "fs-quota" ]
 
 # Include debug info in release builds.
 [profile.release]
@@ -76,7 +76,7 @@ webdav-handler = { path = "webdav-handler-rs", version = "=0.2.0" }
 #webdav-handler = "0.2.0"
 pwhash = "1.0.0"
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
 pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
 tls-listener = { version = "0.2.1", features = [ "hyper-h1", "hyper-h2" ] }

@@ -86,7 +86,7 @@ impl DavFileSystem for UserFs {
         self.fs.copy(from, to)
     }
 
-    #[cfg(feature = "quota")]
+    #[cfg(all(not(windows), feature = "quota"))]
     fn get_quota<'a>(&'a self) -> FsFuture<(u64, Option<u64>)> {
         use crate::cache;
         use fs_quota::*;
