@@ -27,11 +27,12 @@ categories = ["filesystem"]
 #
 #     cargo build --release --no-default-features --features=quota
 #
-default = [ "pam", "quota" ]
+default = [ "pam", "quota", "tls" ]
 
 # dependencies for the feature.
 pam = [ "pam-sandboxed" ]
 quota = [ "fs-quota" ]
+tls = []
 
 # Include debug info in release builds.
 [profile.release]
@@ -63,22 +64,23 @@ nix = "0.21.0"
 #pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
 percent-encoding = "2.1.0"
 regex = "1.5.4"
+rustls-pemfile = "1.0.0"
 serde = { version = "1.0.125", features = ["derive"] }
 serde_json = "1.0.64"
 socket2 = "0.4.0"
 time = "0.1.42"
-#tls-listener = { version = "0.2.1", features = [ "hyper-h1", "hyper-h2" ] }
+#tls-listener = { version = "0.5.1", features = [ "hyper-h1", "hyper-h2", "rustls" ] }
 tokio = { version = "1.5.0", features = ["full"] }
-#tokio-rustls = "0.22.0"
+#tokio-rustls = "0.23.4"
 toml = "0.5.8"
 url = "2.2.2"
 webdav-handler = { path = "webdav-handler-rs", version = "=0.2.0" }
 #webdav-handler = "0.2.0"
 pwhash = "1.0.0"
 
-[target.'cfg(not(target_os = "windows"))'.dependencies]
+[target.'cfg(not(windows))'.dependencies]
 fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
 pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
-tls-listener = { version = "0.2.1", features = [ "hyper-h1", "hyper-h2" ] }
-tokio-rustls = "0.22.0"
+tls-listener = { version = "0.5.1", features = [ "hyper-h1", "hyper-h2", "rustls" ] }
+tokio-rustls = "0.23.4"
 

@@ -28,7 +28,7 @@ mod userfs;
 use std::convert::TryFrom;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
-#[cfg(feature = "tls")]
+#[cfg(all(not(windows), feature = "tls"))]
 use std::os::unix::io::{FromRawFd, AsRawFd};
 use std::process::exit;
 use std::sync::Arc;
@@ -41,9 +41,9 @@ use hyper::{
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
 };
-#[cfg(feature = "tls")]
+#[cfg(all(not(windows), feature = "tls"))]
 use tls_listener::TlsListener;
-#[cfg(feature = "tls")]
+#[cfg(all(not(windows), feature = "tls"))]
 use tokio_rustls::server::TlsStream;
 use webdav_handler::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
 use webdav_handler::{fakels::FakeLs, fs::DavFileSystem, ls::DavLockSystem};
@@ -52,8 +52,8 @@ use crate::config::{AcctType, Auth, CaseInsensitive, Handler, Location, OnNotfou
 use crate::rootfs::RootFs;
 use crate::router::MatchedRoute;
 use crate::suid::proc_switch_ugid;
-#[cfg(feature = "tls")]
-use crate::tls::tls_config;
+#[cfg(all(not(windows), feature = "tls"))]
+use crate::tls::tls_acceptor;
 use crate::userfs::UserFs;
 
 static PROGNAME: &'static str = "webdav-server";
@@ -105,48 +105,41 @@ impl Server {
             None => return Ok(None),
         };
 
-        #[cfg(target_os = "windows")]
+		#[cfg(target_os = "windows")]
             panic!();
-        #[cfg(not(target_os = "windows"))]
+		#[cfg(not(target_os = "windows"))]
         {
-            // check if user exists.
-            let pwd = match cache::cached::unixuser(user, self.config.unix.aux_groups).await {
-                Ok(pwd) => pwd,
-                Err(_) => {
-                    debug!("acct: unix: user {} not found", user);
-                    return Err(StatusCode::UNAUTHORIZED);
-                },
-            };
+        
+        // check if user exists.
+        let pwd = match cache::cached::unixuser(user, self.config.unix.aux_groups).await {
+            Ok(pwd) => pwd,
+            Err(_) => {
+                debug!("acct: unix: user {} not found", user);
+                return Err(StatusCode::UNAUTHORIZED);
+            },
+        };
 
-            // check minimum uid
-            if let Some(min_uid) = self.config.unix.min_uid {
-                if pwd.uid < min_uid {
-                    debug!("acct: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
-                    return Err(StatusCode::FORBIDDEN);
-                }
+        // check minimum uid
+        if let Some(min_uid) = self.config.unix.min_uid {
+            if pwd.uid < min_uid {
+                debug!("acct: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
+                return Err(StatusCode::FORBIDDEN);
             }
-            Ok(Some(pwd))
+        }
+        Ok(Some(pwd))
+
         }
     }
 
-    // return a new response::Builder with the Server: header set.
+    // return a new response::Builder with the Server and CORS header set.
     fn response_builder(&self) -> http::response::Builder {
         let mut builder = hyper::Response::builder();
-        let id = self
-            .config
-            .server
-            .identification
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or("webdav-server-rs");
-        if id != "" {
-            builder = builder.header("Server", id);
-        }
+        self.set_headers(builder.headers_mut().unwrap());
         builder
     }
 
-    // Set Server: webdav-server-rs header.
-    fn set_server_header(&self, headers: &mut http::HeaderMap<http::header::HeaderValue>) {
+    // Set Server: webdav-server-rs header, and CORS.
+    fn set_headers(&self, headers: &mut http::HeaderMap<http::header::HeaderValue>) {
         let id = self
             .config
             .server
@@ -156,6 +149,11 @@ impl Server {
             .unwrap_or("webdav-server-rs");
         if id != "" {
             headers.insert("server", id.parse().unwrap());
+        }
+        if self.config.server.cors {
+            headers.insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+            headers.insert("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS,PROPFIND".parse().unwrap());
+            headers.insert("Access-Control-Allow-Headers", "DNT,Depth,Range".parse().unwrap());
         }
     }
 
@@ -382,11 +380,10 @@ impl Server {
     async fn run_davhandler(&self, config: DavConfig, req: HttpRequest) -> HttpResult {
         let resp = self.dh.handle_with(config, req).await;
         let (mut parts, body) = resp.into_parts();
-        self.set_server_header(&mut parts.headers);
+        self.set_headers(&mut parts.headers);
         Ok(http::Response::from_parts(parts, body))
     }
 }
-
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // command line option processing.
@@ -466,7 +463,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // build servers (one for each listen address).
         let dav_server = Server::new(config.clone(), auth);
         let mut servers = Vec::new();
-        #[cfg(feature="tls")]
+        #[cfg(all(not(windows), feature = "tls"))]
         let mut tls_servers = Vec::new();
 
         // Plaintext servers.
@@ -502,68 +499,72 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
 
-        #[cfg(feature="tls")]
+        #[cfg(all(not(windows), feature = "tls"))]
         // TLS servers.
-        for sockaddr in tls_addrs {
-            let listener = make_listener(sockaddr).unwrap_or_else(|e| {
-                eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
-                exit(1);
-            });
-            let dav_server = dav_server.clone();
-            let tls_config = tls_config(&config.server)?;
-            let make_service = make_service_fn(move |stream: &TlsStream<AddrStream>| {
+        if tls_addrs.len() > 0 {
+            let tls_acceptor = tls_acceptor(&config.server)?;
+
+            for sockaddr in tls_addrs {
+                let tls_acceptor = tls_acceptor.clone();
+                let listener = make_listener(sockaddr).unwrap_or_else(|e| {
+                    eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
+                    exit(1);
+                });
                 let dav_server = dav_server.clone();
-                let remote_addr = stream.get_ref().0.remote_addr();
-                async move {
-                    let func = move |req| {
-                        let dav_server = dav_server.clone();
-                        async move { dav_server.route(req, remote_addr).await }
-                    };
-                    Ok::<_, hyper::Error>(service_fn(func))
-                }
-            });
-
-            // Since the server can exit when there's an error on the TlsStream,
-            // we run it in a loop. Every time the loop is entered we dup() the
-            // listening fd and create a new TcpListener. This way, we should
-            // not lose any pending connections during a restart.
-            let master_listen_fd = listener.as_raw_fd();
-            std::mem::forget(listener);
-
-            println!("Listening on http://{:?}", sockaddr);
-            tls_servers.push(async move {
-                loop {
-                    // reuse the incoming socket after the server exits.
-                    let listen_fd = match nix::unistd::dup(master_listen_fd) {
-                        Ok(fd) => fd,
-                        Err(e) => {
-                            eprintln!("{}: server error: dup: {}", PROGNAME, e);
-                            break;
-                        }
-                    };
-                    // SAFETY: listen_fd is unique (we just dup'ed it).
-                    let std_listen = unsafe { std::net::TcpListener::from_raw_fd(listen_fd) };
-                    let listener = match tokio::net::TcpListener::from_std(std_listen) {
-                        Ok(l) => l,
-                        Err(e) => {
-                            eprintln!("{}: server error: new TcpListener: {}", PROGNAME, e);
-                            break;
-                        }
-                    };
-                    let a_incoming = match AddrIncoming::from_listener(listener) {
-                        Ok(a) => a,
-                        Err(e) => {
-                            eprintln!("{}: server error: new AddrIncoming: {}", PROGNAME, e);
-                            break;
-                        }
-                    };
-                    let incoming = TlsListener::new(tls_config.clone(), a_incoming);
-                    let server = hyper::Server::builder(incoming);
-                    if let Err(e) = server.serve(make_service.clone()).await {
-                        eprintln!("{}: server error: {} (retrying)", PROGNAME, e);
+                let make_service = make_service_fn(move |stream: &TlsStream<AddrStream>| {
+                    let dav_server = dav_server.clone();
+                    let remote_addr = stream.get_ref().0.remote_addr();
+                    async move {
+                        let func = move |req| {
+                            let dav_server = dav_server.clone();
+                            async move { dav_server.route(req, remote_addr).await }
+                        };
+                        Ok::<_, hyper::Error>(service_fn(func))
                     }
-                }
-            });
+                });
+
+                // Since the server can exit when there's an error on the TlsStream,
+                // we run it in a loop. Every time the loop is entered we dup() the
+                // listening fd and create a new TcpListener. This way, we should
+                // not lose any pending connections during a restart.
+                let master_listen_fd = listener.as_raw_fd();
+                std::mem::forget(listener);
+
+                println!("Listening on https://{:?}", sockaddr);
+                tls_servers.push(async move {
+                    loop {
+                        // reuse the incoming socket after the server exits.
+                        let listen_fd = match nix::unistd::dup(master_listen_fd) {
+                            Ok(fd) => fd,
+                            Err(e) => {
+                                eprintln!("{}: server error: dup: {}", PROGNAME, e);
+                                break;
+                            }
+                        };
+                        // SAFETY: listen_fd is unique (we just dup'ed it).
+                        let std_listen = unsafe { std::net::TcpListener::from_raw_fd(listen_fd) };
+                        let listener = match tokio::net::TcpListener::from_std(std_listen) {
+                            Ok(l) => l,
+                            Err(e) => {
+                                eprintln!("{}: server error: new TcpListener: {}", PROGNAME, e);
+                                break;
+                            }
+                        };
+                        let a_incoming = match AddrIncoming::from_listener(listener) {
+                            Ok(a) => a,
+                            Err(e) => {
+                                eprintln!("{}: server error: new AddrIncoming: {}", PROGNAME, e);
+                                break;
+                            }
+                        };
+                        let incoming = TlsListener::new(tls_acceptor.clone(), a_incoming);
+                        let server = hyper::Server::builder(incoming);
+                        if let Err(e) = server.serve(make_service.clone()).await {
+                            eprintln!("{}: server error: {} (retrying)", PROGNAME, e);
+                        }
+                    }
+                });
+            }
         }
 
         // drop privs.
@@ -587,7 +588,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for server in servers.drain(..) {
             tasks.push(tokio::spawn(server));
         }
-        #[cfg(feature="tls")]
+        #[cfg(all(not(windows), feature = "tls"))]
         for server in tls_servers.drain(..) {
             tasks.push(tokio::spawn(server));
         }
