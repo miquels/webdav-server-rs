@@ -2,16 +2,16 @@ use std::fs::File;
 use std::io::{self, ErrorKind};
 use std::sync::Arc;
 
-#[cfg(all(not(windows), feature = "tls"))]
+#[cfg(feature = "tls")]
 use tokio_rustls::rustls::{Certificate, PrivateKey, ServerConfig};
-#[cfg(all(not(windows), feature = "tls"))]
+#[cfg(feature = "tls")]
 use tokio_rustls::TlsAcceptor;
-#[cfg(all(not(windows), feature = "tls"))]
+#[cfg(feature = "tls")]
 use rustls_pemfile as pemfile;
 
 use crate::config::Server;
 
-#[cfg(all(not(windows), feature = "tls"))]
+#[cfg(feature = "tls")]
 pub fn tls_acceptor(cfg: &Server) -> io::Result<TlsAcceptor> {
 
     // Private key.

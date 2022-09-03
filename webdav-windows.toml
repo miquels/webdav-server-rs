@@ -5,6 +5,12 @@
   # HTTP Port(s) to listen on.
   # (https not implemented yet - use a frontend proxy like nginx)
   listen = [ "0.0.0.0:4918", "[::]:4918" ]
+
+  # Tls config.
+  tls_listen = [ "0.0.0.0:443", "[::]:443" ]
+  tls_cert = "ssl.cert"
+  tls_key = "ssl.key"
+
   # Unix uid/gid to run under (when not running setuid as user).
   # Optional - if not set, will not change uid.
   # uid = 33

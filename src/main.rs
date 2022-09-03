@@ -28,8 +28,10 @@ mod userfs;
 use std::convert::TryFrom;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
-#[cfg(all(not(windows), feature = "tls"))]
+#[cfg(all(not(windows), feature ="tls"))]
 use std::os::unix::io::{FromRawFd, AsRawFd};
+#[cfg(all(windows, feature ="tls"))]
+use std::os::windows::prelude::{AsRawSocket, FromRawSocket};
 use std::process::exit;
 use std::sync::Arc;
 
@@ -41,9 +43,10 @@ use hyper::{
     server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
 };
-#[cfg(all(not(windows), feature = "tls"))]
+#[cfg(feature = "tls")]
 use tls_listener::TlsListener;
-#[cfg(all(not(windows), feature = "tls"))]
+use tokio::time::error::Elapsed;
+#[cfg(feature = "tls")]
 use tokio_rustls::server::TlsStream;
 use webdav_handler::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
 use webdav_handler::{fakels::FakeLs, fs::DavFileSystem, ls::DavLockSystem};
@@ -52,7 +55,7 @@ use crate::config::{AcctType, Auth, CaseInsensitive, Handler, Location, OnNotfou
 use crate::rootfs::RootFs;
 use crate::router::MatchedRoute;
 use crate::suid::proc_switch_ugid;
-#[cfg(all(not(windows), feature = "tls"))]
+#[cfg(feature = "tls")]
 use crate::tls::tls_acceptor;
 use crate::userfs::UserFs;
 
@@ -463,7 +466,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // build servers (one for each listen address).
         let dav_server = Server::new(config.clone(), auth);
         let mut servers = Vec::new();
-        #[cfg(all(not(windows), feature = "tls"))]
+        #[cfg(feature = "tls")]
         let mut tls_servers = Vec::new();
 
         // Plaintext servers.
@@ -499,7 +502,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
 
-        #[cfg(all(not(windows), feature = "tls"))]
+        #[cfg(feature = "tls")]
         // TLS servers.
         if tls_addrs.len() > 0 {
             let tls_acceptor = tls_acceptor(&config.server)?;
@@ -527,13 +530,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // we run it in a loop. Every time the loop is entered we dup() the
                 // listening fd and create a new TcpListener. This way, we should
                 // not lose any pending connections during a restart.
+                #[cfg(not(windows))]
                 let master_listen_fd = listener.as_raw_fd();
+                #[cfg(windows)]
+                let master_listen_fd = listener.as_raw_socket();
                 std::mem::forget(listener);
-
                 println!("Listening on https://{:?}", sockaddr);
                 tls_servers.push(async move {
                     loop {
                         // reuse the incoming socket after the server exits.
+                        #[cfg(not(windows))]
                         let listen_fd = match nix::unistd::dup(master_listen_fd) {
                             Ok(fd) => fd,
                             Err(e) => {
@@ -541,8 +547,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 break;
                             }
                         };
+                        #[cfg(windows)]
+                        let listen_fd = {
+                            let mut infoW=  winapi::um::winsock2::WSAPROTOCOL_INFOW{..Default::default()}; // = Default::default();
+                            let error = unsafe { winapi::um::winsock2::WSADuplicateSocketW(master_listen_fd as usize, 
+                                winapi::um::processthreadsapi::GetCurrentProcessId(),
+                                &mut infoW) };
+                            if error != 0 {
+//                                let error = unsafe { winapi::um::errhandlingapi::GetLastError() };
+                                eprintln!("{}: WSADuplicateSocketW error", PROGNAME);
+                                break;
+                            }
+                            let listen_fd = unsafe { winapi::um::winsock2::WSASocketW(
+                                winapi::shared::ws2def::AF_INET,
+                                winapi::shared::ws2def::SOCK_STREAM,
+                                winapi::shared::ws2def::IPPROTO_TCP as i32,
+                                &mut infoW,
+                                0,
+                                0) };
+                            if listen_fd == winapi::um::winsock2::INVALID_SOCKET {
+                                eprintln!("{}: Socket Duplicate error", PROGNAME);
+                                break;
+                            }    
+                            listen_fd
+                        };                        
                         // SAFETY: listen_fd is unique (we just dup'ed it).
+                        #[cfg(not(windows))]
                         let std_listen = unsafe { std::net::TcpListener::from_raw_fd(listen_fd) };
+                        #[cfg(windows)]
+                        let std_listen = unsafe { std::net::TcpListener::from_raw_socket(listen_fd as u64) };
                         let listener = match tokio::net::TcpListener::from_std(std_listen) {
                             Ok(l) => l,
                             Err(e) => {
@@ -588,7 +621,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for server in servers.drain(..) {
             tasks.push(tokio::spawn(server));
         }
-        #[cfg(all(not(windows), feature = "tls"))]
+        #[cfg(feature = "tls")]
         for server in tls_servers.drain(..) {
             tasks.push(tokio::spawn(server));
         }
