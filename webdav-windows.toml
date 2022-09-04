@@ -8,8 +8,8 @@
 
   # Tls config.
   tls_listen = [ "0.0.0.0:443", "[::]:443" ]
-  tls_cert = "ssl.cert"
-  tls_key = "ssl.key"
+  tls_cert = "../../localhost.crt"
+  tls_key = "../../localhost.key"
 
   # Unix uid/gid to run under (when not running setuid as user).
   # Optional - if not set, will not change uid.
