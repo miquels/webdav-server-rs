@@ -28,9 +28,9 @@ mod userfs;
 use std::convert::TryFrom;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
-#[cfg(all(not(windows), feature ="tls"))]
+#[cfg(all(not(windows), feature = "tls"))]
 use std::os::unix::io::{FromRawFd, AsRawFd};
-#[cfg(all(windows, feature ="tls"))]
+#[cfg(all(windows, feature = "tls"))]
 use std::os::windows::prelude::{AsRawSocket, FromRawSocket};
 use std::process::exit;
 use std::sync::Arc;
@@ -549,7 +549,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
                         #[cfg(windows)]
                         let listen_fd = {
-                            let mut infoW=  winapi::um::winsock2::WSAPROTOCOL_INFOW{..Default::default()}; // = Default::default();
+                            let mut infoW = winapi::um::winsock2::WSAPROTOCOL_INFOW::default(); 
                             let error = unsafe { winapi::um::winsock2::WSADuplicateSocketW(master_listen_fd as usize, 
                                 winapi::um::processthreadsapi::GetCurrentProcessId(),
                                 &mut infoW) };

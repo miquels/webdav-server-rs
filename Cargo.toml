@@ -74,8 +74,9 @@ tokio = { version = "1.5.0", features = ["full"] }
 #tokio-rustls = "0.23.4"
 toml = "0.5.8"
 url = "2.2.2"
-webdav-handler = { path = "webdav-handler-rs", version = "=0.2.0" }
+#webdav-handler = { path = "webdav-handler-rs", version = "=0.2.0" }
 #webdav-handler = "0.2.0"
+webdav-handler = { git = "https://github.com/sj6219/webdav-handler-rs.git", branch = "win" }
 pwhash = "1.0.0"
 tls-listener = { version = "0.5.1", features = [ "hyper-h1", "hyper-h2", "rustls" ] }
 tokio-rustls = "0.23.4"
