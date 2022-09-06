@@ -81,6 +81,7 @@ pwhash = "1.0.0"
 tls-listener = { version = "0.5.1", features = [ "hyper-h1", "hyper-h2", "rustls" ] }
 tokio-rustls = "0.23.4"
 winapi = {version = "0.3.9", features = [ "impl-default"] }
+futures-util = "0.3.8"
 
 [target.'cfg(not(windows))'.dependencies]
 fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }

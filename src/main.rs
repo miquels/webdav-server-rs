@@ -526,76 +526,85 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 });
 
-                // Since the server can exit when there's an error on the TlsStream,
-                // we run it in a loop. Every time the loop is entered we dup() the
-                // listening fd and create a new TcpListener. This way, we should
-                // not lose any pending connections during a restart.
-                #[cfg(not(windows))]
-                let master_listen_fd = listener.as_raw_fd();
-                #[cfg(windows)]
-                let master_listen_fd = listener.as_raw_socket();
-                std::mem::forget(listener);
+                // // Since the server can exit when there's an error on the TlsStream,
+                // // we run it in a loop. Every time the loop is entered we dup() the
+                // // listening fd and create a new TcpListener. This way, we should
+                // // not lose any pending connections during a restart.
+                // #[cfg(not(windows))]
+                // let master_listen_fd = listener.as_raw_fd();
+                // #[cfg(windows)]
+                // let master_listen_fd = listener.as_raw_socket();
+                // std::mem::forget(listener);
                 println!("Listening on https://{:?}", sockaddr);
                 tls_servers.push(async move {
-                    loop {
-                        // reuse the incoming socket after the server exits.
-                        #[cfg(not(windows))]
-                        let listen_fd = match nix::unistd::dup(master_listen_fd) {
-                            Ok(fd) => fd,
-                            Err(e) => {
-                                eprintln!("{}: server error: dup: {}", PROGNAME, e);
-                                break;
-                            }
-                        };
-                        #[cfg(windows)]
-                        let listen_fd = {
-                            let mut infoW = winapi::um::winsock2::WSAPROTOCOL_INFOW::default(); 
-                            let error = unsafe { winapi::um::winsock2::WSADuplicateSocketW(master_listen_fd as usize, 
-                                winapi::um::processthreadsapi::GetCurrentProcessId(),
-                                &mut infoW) };
-                            if error != 0 {
-//                                let error = unsafe { winapi::um::errhandlingapi::GetLastError() };
-                                eprintln!("{}: WSADuplicateSocketW error", PROGNAME);
-                                break;
-                            }
-                            let listen_fd = unsafe { winapi::um::winsock2::WSASocketW(
-                                winapi::shared::ws2def::AF_INET,
-                                winapi::shared::ws2def::SOCK_STREAM,
-                                winapi::shared::ws2def::IPPROTO_TCP as i32,
-                                &mut infoW,
-                                0,
-                                0) };
-                            if listen_fd == winapi::um::winsock2::INVALID_SOCKET {
-                                eprintln!("{}: Socket Duplicate error", PROGNAME);
-                                break;
-                            }    
-                            listen_fd
-                        };                        
-                        // SAFETY: listen_fd is unique (we just dup'ed it).
-                        #[cfg(not(windows))]
-                        let std_listen = unsafe { std::net::TcpListener::from_raw_fd(listen_fd) };
-                        #[cfg(windows)]
-                        let std_listen = unsafe { std::net::TcpListener::from_raw_socket(listen_fd as u64) };
-                        let listener = match tokio::net::TcpListener::from_std(std_listen) {
-                            Ok(l) => l,
-                            Err(e) => {
-                                eprintln!("{}: server error: new TcpListener: {}", PROGNAME, e);
-                                break;
-                            }
-                        };
+                    //loop {
+                        // // reuse the incoming socket after the server exits.
+                        // #[cfg(not(windows))]
+                        // let listen_fd = match nix::unistd::dup(master_listen_fd) {
+                        //     Ok(fd) => fd,
+                        //     Err(e) => {
+                        //         eprintln!("{}: server error: dup: {}", PROGNAME, e);
+                        //         break;
+                        //     }
+                        // };
+                        // #[cfg(windows)]
+                        // let listen_fd = {
+                        //     let mut infoW = winapi::um::winsock2::WSAPROTOCOL_INFOW::default(); 
+                        //     let error = unsafe { winapi::um::winsock2::WSADuplicateSocketW(master_listen_fd as usize, 
+                        //         winapi::um::processthreadsapi::GetCurrentProcessId(),
+                        //         &mut infoW) };
+                        //     if error != 0 {
+                        //         eprintln!("{}: WSADuplicateSocketW error", PROGNAME);
+                        //         break;
+                        //     }
+                        //     let listen_fd = unsafe { winapi::um::winsock2::WSASocketW(
+                        //         winapi::shared::ws2def::AF_INET,
+                        //         winapi::shared::ws2def::SOCK_STREAM,
+                        //         winapi::shared::ws2def::IPPROTO_TCP as i32,
+                        //         &mut infoW,
+                        //         0,
+                        //         0) };
+                        //     if listen_fd == winapi::um::winsock2::INVALID_SOCKET {
+                        //         eprintln!("{}: Socket Duplicate error", PROGNAME);
+                        //         break;
+                        //     }    
+                        //     listen_fd
+                        // };                        
+                        // // SAFETY: listen_fd is unique (we just dup'ed it).
+                        // #[cfg(not(windows))]
+                        // let std_listen = unsafe { std::net::TcpListener::from_raw_fd(listen_fd) };
+                        // #[cfg(windows)]
+                        // let std_listen = unsafe { std::net::TcpListener::from_raw_socket(listen_fd as u64) };
+                        // let listener = match tokio::net::TcpListener::from_std(std_listen) {
+                        //     Ok(l) => l,
+                        //     Err(e) => {
+                        //         eprintln!("{}: server error: new TcpListener: {}", PROGNAME, e);
+                        //         break;
+                        //     }
+                        // };
                         let a_incoming = match AddrIncoming::from_listener(listener) {
                             Ok(a) => a,
                             Err(e) => {
                                 eprintln!("{}: server error: new AddrIncoming: {}", PROGNAME, e);
-                                break;
+                                exit(1); //break;
                             }
                         };
-                        let incoming = TlsListener::new(tls_acceptor.clone(), a_incoming);
+                        use futures_util::stream::StreamExt;
+                        use std::future::ready;
+                        let incoming = TlsListener::new(tls_acceptor.clone(), a_incoming).filter(|conn| {
+                            if let Err(err) = conn {
+                                eprintln!("Error: {:?}", err);
+                                ready(false)
+                            } else {
+                                ready(true)
+                            }
+                        });
+                        let incoming = hyper::server::accept::from_stream(incoming);
                         let server = hyper::Server::builder(incoming);
                         if let Err(e) = server.serve(make_service.clone()).await {
                             eprintln!("{}: server error: {} (retrying)", PROGNAME, e);
                         }
-                    }
+                    // }
                 });
             }
         }
