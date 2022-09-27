@@ -88,3 +88,5 @@ fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
 pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
 
 
+[patch.crates-io]
+ring = { git = "https://github.com/sj6219/ring", branch = "0.16.20_alpha" }
