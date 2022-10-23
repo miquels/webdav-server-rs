@@ -51,10 +51,13 @@ fn main() {
         .flag_if_supported("-Wno-unused-variable")
         .compile("fs_quota");
 
-    if Path::new("/usr/include/tirpc").exists() {
-        println!("cargo:rustc-link-lib=tirpc");
-    } else {
-        println!("cargo:rustc-link-lib=rpcsvc");
+    #[cfg(feature = "nfs")]
+    {
+        if Path::new("/usr/include/tirpc").exists() {
+            println!("cargo:rustc-link-lib=tirpc");
+        } else {
+            println!("cargo:rustc-link-lib=rpcsvc");
+        }
     }
 
     #[cfg(target_os = "linux")]
