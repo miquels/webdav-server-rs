@@ -87,7 +87,7 @@ impl DavFileSystem for UserFs {
     }
 
     #[cfg(feature = "quota")]
-    fn get_quota<'a>(&'a self) -> FsFuture<(u64, Option<u64>)> {
+    fn get_quota<'a>(&'a self, path: &'a DavPath) -> FsFuture<(u64, Option<u64>)> {
         use crate::cache;
         use fs_quota::*;
         use futures::future::FutureExt;
@@ -98,15 +98,18 @@ impl DavFileSystem for UserFs {
         }
 
         async move {
-            let mut key = self.basedir.clone();
-            key.push(&self.uid.to_string());
+            let path = path.as_pathbuf();
+            let path = self.basedir.join(match path.strip_prefix("/") {
+                Ok(p) => p.to_path_buf(),
+                Err(_) => path
+            });
+            let key = path.join(&self.uid.to_string());
             let r = match QCACHE.get(&key) {
                 Some(r) => {
                     debug!("get_quota for {:?}: from cache", key);
                     r
                 },
                 None => {
-                    let path = self.basedir.clone();
                     let uid = self.uid;
                     let r = self
                         .fs
