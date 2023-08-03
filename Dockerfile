@@ -15,7 +15,8 @@ FROM busybox:musl
 RUN mkdir -p /data
 COPY webdav-server.toml /data/
 RUN ln -s /data/webdav-server.toml ./webdav-server.toml
+RUN ln -s /data/webdav-server.toml /etc/webdav-server.toml 
 
 COPY --from=build /usr/local/cargo/bin/webdav-server .
-USER 1000
+USER 0
 CMD ["./webdav-server"]
