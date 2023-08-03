@@ -1,4 +1,4 @@
-FROM rust:1.59.0-alpine AS build
+FROM rust:1.71.0-alpine AS build
 WORKDIR /usr/src
 
 RUN rustup target add x86_64-unknown-linux-musl
