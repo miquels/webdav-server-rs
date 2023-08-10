@@ -55,6 +55,10 @@ aforementioned frontend proxies.
 ## Docker Usage
 Docker image can be built using `docker build -t webdav-server .`, in order to configure it attach a volume to `/data/` and edit the `webdav-server.toml` in there. It's recommended to change the `location.directory` and `htpasswd` (if set) to that directory as well to ensure persistent data.
 
+Pass the port(s) through when you run the docker image with the `-p` flag.
+```sh
+docker run -p 4918:4918 -t webdav-server
+```
 ## Copyright and License.
 
  * © 2018, 2019 XS4ALL Internet bv
