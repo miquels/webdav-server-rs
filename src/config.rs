@@ -4,8 +4,6 @@ use std::path::Path;
 use std::process::exit;
 use std::{fs, io};
 
-use enum_from_str::ParseEnumVariantError;
-use enum_from_str_derive::FromStr;
 use serde::{Deserialize, Deserializer};
 use toml;
 use webdav_handler::DavMethodSet;
@@ -53,7 +51,7 @@ pub struct Server {
 pub struct Accounts {
     #[serde(rename = "auth-type", deserialize_with = "deserialize_authtype", default)]
     pub auth_type: Option<AuthType>,
-    #[serde(rename = "acct-type", deserialize_with = "deserialize_opt_enum", default)]
+    #[serde(rename = "acct-type", default)]
     pub acct_type: Option<AcctType>,
     #[serde(default)]
     pub realm:     Option<String>,
@@ -88,11 +86,10 @@ pub struct Location {
     pub route:            Vec<String>,
     #[serde(deserialize_with = "deserialize_methodset", default)]
     pub methods:          Option<DavMethodSet>,
-    #[serde(deserialize_with = "deserialize_opt_enum", default)]
+    #[serde( default)]
     pub auth:             Option<Auth>,
     #[serde(default, flatten)]
     pub accounts:         Accounts,
-    #[serde(deserialize_with = "deserialize_enum")]
     pub handler:          Handler,
     #[serde(default)]
     pub setuid:           bool,
@@ -103,33 +100,26 @@ pub struct Location {
     pub indexfile:        Option<String>,
     #[serde(default)]
     pub autoindex:        bool,
-    #[serde(
-        rename = "case-insensitive",
-        deserialize_with = "deserialize_opt_enum",
-        default
-    )]
+    #[serde(rename = "case-insensitive", default)]
     pub case_insensitive: Option<CaseInsensitive>,
-    #[serde(deserialize_with = "deserialize_opt_enum", default)]
+    #[serde(default)]
     pub on_notfound:      Option<OnNotfound>,
 }
 
-#[derive(FromStr, Debug, Clone, Copy)]
+#[derive(Deserialize, Debug, Clone, Copy)]
 pub enum Handler {
-    #[from_str = "virtroot"]
+    #[serde(rename = "virtroot")]
     Virtroot,
-    #[from_str = "filesystem"]
+    #[serde(rename = "filesystem")]
     Filesystem,
 }
 
-#[derive(FromStr, Debug, Clone, Copy)]
+#[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
 pub enum Auth {
-    #[from_str = "false"]
     False,
-    #[from_str = "true"]
     True,
-    #[from_str = "opportunistic"]
     Opportunistic,
-    #[from_str = "write"]
     Write,
 }
 
@@ -140,27 +130,24 @@ pub enum AuthType {
     HtPasswd(String),
 }
 
-#[derive(FromStr, Debug, Clone, Copy)]
+#[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
 pub enum AcctType {
-    #[from_str = "unix"]
     Unix,
 }
 
-#[derive(FromStr, Debug, Clone, Copy)]
+#[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
 pub enum CaseInsensitive {
-    #[from_str = "true"]
     True,
-    #[from_str = "ms"]
     Ms,
-    #[from_str = "false"]
     False,
 }
 
-#[derive(FromStr, Debug, Clone, Copy)]
+#[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
 pub enum OnNotfound {
-    #[from_str = "continue"]
     Continue,
-    #[from_str = "return"]
     Return,
 }
 
@@ -239,31 +226,6 @@ where D: Deserializer<'de> {
         return Ok(None);
     }
     Err(serde::de::Error::custom("unknown auth-type"))
-}
-
-pub fn deserialize_opt_enum<'de, D, E>(deserializer: D) -> Result<Option<E>, D::Error>
-where
-    D: Deserializer<'de>,
-    E: std::str::FromStr,
-    E::Err: std::fmt::Display,
-{
-    String::deserialize(deserializer)?
-        .as_str()
-        .parse::<E>()
-        .map(|e| Some(e))
-        .map_err(serde::de::Error::custom)
-}
-
-pub fn deserialize_enum<'de, D, E>(deserializer: D) -> Result<E, D::Error>
-where
-    D: Deserializer<'de>,
-    E: std::str::FromStr,
-    E::Err: std::fmt::Display,
-{
-    String::deserialize(deserializer)?
-        .as_str()
-        .parse::<E>()
-        .map_err(serde::de::Error::custom)
 }
 
 // Read the TOML config into a config::Config struct.

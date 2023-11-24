@@ -381,6 +381,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (@arg CFG: -c --config +takes_value "configuration file (/etc/webdav-server.toml)")
         (@arg PORT: -p --port +takes_value "listen to this port on localhost only")
         (@arg DBG: -D --debug "enable debug level logging")
+        (@arg DMP: -P --print_config "print configuration and exit")
     )
     .get_matches();
 
@@ -396,17 +397,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = matches.value_of("CFG").unwrap_or("/etc/webdav-server.toml");
 
     // read config.
-    let mut config = match config::read(cfg.clone()) {
+    let mut config = match config::read(cfg) {
         Err(e) => {
             eprintln!("{}: {}: {}", PROGNAME, cfg, e);
             exit(1);
         },
         Ok(c) => c,
     };
-    config::check(cfg.clone(), &config);
+    config::check(cfg, &config);
+
+    if matches.is_present("DMP") {
+        println!("{:#?}", config);
+        exit(0);
+    }
 
     // build routes.
-    if let Err(e) = config::build_routes(cfg.clone(), &mut config) {
+    if let Err(e) = config::build_routes(cfg, &mut config) {
         eprintln!("{}: {}: {}", PROGNAME, cfg, e);
         exit(1);
     }
