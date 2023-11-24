@@ -1735,7 +1735,7 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
- "socket2 0.4.10",
+ "socket2 0.5.5",
  "time 0.1.45",
  "tls-listener",
  "tokio",

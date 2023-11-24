@@ -45,6 +45,8 @@ pub struct Server {
     pub identification: Option<String>,
     #[serde(default)]
     pub cors:             bool,
+    #[serde(default)]
+    pub congestion_control: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]

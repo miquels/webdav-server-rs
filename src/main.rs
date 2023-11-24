@@ -21,6 +21,7 @@ mod rootfs;
 #[doc(hidden)]
 pub mod router;
 mod suid;
+mod tcp_cong;
 mod tls;
 mod unixuser;
 mod userfs;
@@ -458,7 +459,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Plaintext servers.
         for sockaddr in addrs {
-            let listener = match make_listener(sockaddr) {
+            let listener = match make_listener(&config.server, sockaddr) {
                 Ok(l) => l,
                 Err(e) => {
                     eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
@@ -495,7 +496,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             for sockaddr in tls_addrs {
                 let tls_acceptor = tls_acceptor.clone();
-                let listener = make_listener(sockaddr).unwrap_or_else(|e| {
+                let listener = make_listener(&config.server, sockaddr).unwrap_or_else(|e| {
                     eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
                     exit(1);
                 });
@@ -624,9 +625,17 @@ fn expand_directory(dir: &str, pwd: Option<&Arc<unixuser::User>>) -> Result<Stri
 
 // Make a new TcpListener, and if it's a V6 listener, set the
 // V6_V6ONLY socket option on it.
-fn make_listener(addr: SocketAddr) -> io::Result<tokio::net::TcpListener> {
+fn make_listener(srv: &config::Server, addr: SocketAddr) -> io::Result<tokio::net::TcpListener> {
     use socket2::{Domain, SockAddr, Socket, Type, Protocol};
     let s = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    if let Some(cong) = srv.congestion_control.as_ref() {
+        tcp_cong::set_congestion_control(&s, cong).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("congestion control {}: {}", cong, e),
+            )
+        })?;
+    }
     if addr.is_ipv6() {
         s.set_only_v6(true)?;
     }
