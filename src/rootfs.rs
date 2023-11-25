@@ -70,8 +70,8 @@ impl DavFileSystem for RootFs {
     }
 
     // forward quota.
-    fn get_quota(&self) -> FsFuture<(u64, Option<u64>)> {
-        self.fs.get_quota()
+    fn get_quota<'a>(&'a self, path: &'a DavPath) -> FsFuture<(u64, Option<u64>)> {
+        self.fs.get_quota(path)
     }
 }
 
