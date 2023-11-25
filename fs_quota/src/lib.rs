@@ -104,12 +104,18 @@ impl FsQuota {
         let id = uid.unwrap_or(unsafe { libc::getuid() as u32 });
         let entry = get_mtab_entry(path)?;
 
-        #[cfg(feature = "nfs")]
-        {
-            let fst = fstype(&entry.fstype);
-            if fst == FsType::Nfs {
-                return quota_nfs::get_quota(&entry, id);
-            }
+        let fst = fstype(&entry.fstype);
+        if fst == FsType::Nfs {
+            #[cfg(feature = "nfs")]
+            return quota_nfs::get_quota(&entry, id).or_else(|e| {
+                if e == FqError::PermissionDenied {
+                    Err(e)
+                } else {
+                    Err(FqError::NoQuota)
+                }
+            });
+            #[cfg(not(feature = "nfs"))]
+            return Err(FqError::NoQuota);
         }
 
         get_quota(&entry.device, id)
