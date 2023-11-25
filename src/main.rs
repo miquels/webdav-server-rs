@@ -34,7 +34,6 @@ use std::process::exit;
 use std::sync::Arc;
 
 use clap::clap_app;
-use headers::{authorization::Basic, Authorization, HeaderMapExt};
 use http::status::StatusCode;
 use hyper::{
     self,
@@ -229,12 +228,11 @@ impl Server {
         };
 
         // Do authentication if needed.
-        let auth_hdr = req.headers().typed_get::<Authorization<Basic>>();
         let do_auth = match location.auth {
             Some(Auth::True) => true,
-            Some(Auth::Write) => !DavMethodSet::WEBDAV_RO.contains(method) || auth_hdr.is_some(),
+            Some(Auth::Write) => !DavMethodSet::WEBDAV_RO.contains(method),
             Some(Auth::False) => false,
-            Some(Auth::Opportunistic) | None => auth_hdr.is_some(),
+            Some(Auth::Opportunistic) | None => false,
         };
         let auth_user = if do_auth {
             let user = match self.auth.auth(&req, location, remote_ip).await {

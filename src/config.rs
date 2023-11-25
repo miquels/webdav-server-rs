@@ -130,6 +130,7 @@ pub enum AuthType {
     #[cfg(feature = "pam")]
     Pam,
     HtPasswd(String),
+    XAuth,
 }
 
 #[derive(Deserialize, Debug, Clone, Copy)]
@@ -223,6 +224,9 @@ where D: Deserializer<'de> {
     #[cfg(feature = "pam")]
     if &s == "pam" {
         return Ok(Some(AuthType::Pam));
+    }
+    if &s == "x-authorization" {
+        return Ok(Some(AuthType::XAuth));
     }
     if s == "" {
         return Ok(None);
