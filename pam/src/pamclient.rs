@@ -157,6 +157,7 @@ struct PamAuthTask {
 impl PamAuthTask {
     // Start the server process. Then return a handle to send requests on.
     fn start(serversock: StdUnixStream) -> io::Result<mpsc::Sender<PamRequest1>> {
+        serversock.set_nonblocking(true)?; // so we can use it in tokio.
         let mut serversock = UnixStream::from_std(serversock)?;
 
         // create a request channel.
