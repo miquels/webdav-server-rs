@@ -91,10 +91,10 @@ impl User {
                 let groups = unsafe {
                     std::slice::from_raw_parts(buf.as_ptr() as *const libc::gid_t, ngroups as usize)
                 };
-                //
-                // Only supplementary or auxilary groups, filter out primary.
-                //
-                groups_vec.extend(groups.iter().map(|&g| g as u32).filter(|&g| g != user.gid));
+                // Keep it as is, not filtering.
+                // Some systems requires the GID to be in the list, for some mechanisms (eg. ACL) to work.
+                // See also #25.
+                groups_vec.extend(groups.iter().map(|&g| g as u32));
                 user.groups = groups_vec;
             }
         }
